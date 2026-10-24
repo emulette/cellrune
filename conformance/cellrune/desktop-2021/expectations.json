@@ -4622,10 +4622,13 @@
     "excel_rich_error": false
   },
   "function:imcosh": {
-    "classification": "match",
+    "classification": "divergent",
     "excel_value": "-6.58066304055116-7.58155274274655i",
     "excel_type": "str",
-    "excel_rich_error": false
+    "excel_rich_error": false,
+    "cellrune_value": "-6.58066304055116-7.58155274274654i",
+    "cellrune_type": "str",
+    "note": "The imaginary part is -7.5815527427465443..., which rounds to ...654 at 15 digits as Excel for the web shows; this Mac 2021 build shows ...655."
   },
   "function:imcot": {
     "classification": "match",

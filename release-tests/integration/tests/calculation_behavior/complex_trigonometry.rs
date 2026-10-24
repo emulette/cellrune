@@ -36,11 +36,11 @@ fn complex_trigonometry_formats_fifteen_significant_digits() {
             "0.0051744731840194+0.036275889628626i",
         ),
         ("IMSINH(COMPLEX(3,4))", "-6.548120040911-7.61923172032141i"),
-        // Mac Excel 2021 in the Oracle; Excel Online writes the correctly rounded
-        // -7.58155274274654 for the imaginary part, which f64 sinh and sin miss by an ULP.
+        // Excel Online in the Oracle, the correctly rounded imaginary part -7.5815527427465443...;
+        // Mac Excel 2021 writes -7.58155274274655i, as macOS's sinh and sin give.
         (
             "IMCOSH(COMPLEX(3,4))",
-            "-6.58066304055116-7.58155274274655i",
+            "-6.58066304055116-7.58155274274654i",
         ),
         // Microsoft's example.
         ("IMCOSH(\"4+3i\")", "-27.0349456030742+3.85115333481178i"),

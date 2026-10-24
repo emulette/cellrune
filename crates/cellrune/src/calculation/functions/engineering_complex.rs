@@ -280,7 +280,7 @@ fn reciprocal(
 ) -> Result<ComplexValue, ErrorKind> {
     match divisor {
         Ok(divisor) => divisor.reciprocal(),
-        Err(ErrorKind::Num) if 2.0 * (-growth.abs()).exp() == 0.0 => {
+        Err(ErrorKind::Num) if 2.0 * libm::exp(-growth.abs()) == 0.0 => {
             Ok(ComplexValue::zero(value.suffix()))
         }
         Err(kind) => Err(kind),

@@ -558,6 +558,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 - A cell written where no other style applies takes the number format of the default style. In a
   workbook whose default style declares General as a custom format, as LibreOffice saves it,
   saving an edit no longer fails output verification on the new cell.
+- `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMCOSH`, `IMSECH`, and `IMCSCH`
+  return the same digits on every platform. Their circular and hyperbolic parts came from the
+  platform's math library, so `IMCOSH(COMPLEX(3,4))` showed `-6.58066304055116-7.58155274274655i`
+  on macOS and `-7.58155274274654i`, the correctly rounded value Excel for the web shows, on Linux
+  and Windows.
 - A custom number format whose code is `General`, as Numbers declares the built-in format 0,
   reads as General instead of a date format, and saving an edit of a workbook Numbers exported no
   longer fails with `xlsx.write.output_verification_failed`.

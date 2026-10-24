@@ -243,8 +243,8 @@ impl ComplexValue {
     /// sin(a + bi) = sin a·cosh b + i·cos a·sinh b.
     pub(super) fn sine(self) -> Result<Self, ErrorKind> {
         Self::new(
-            self.real.sin() * self.imaginary.cosh(),
-            self.real.cos() * self.imaginary.sinh(),
+            libm::sin(self.real) * libm::cosh(self.imaginary),
+            libm::cos(self.real) * libm::sinh(self.imaginary),
             self.suffix,
         )
     }
@@ -252,8 +252,8 @@ impl ComplexValue {
     /// cos(a + bi) = cos a·cosh b − i·sin a·sinh b.
     pub(super) fn cosine(self) -> Result<Self, ErrorKind> {
         Self::new(
-            self.real.cos() * self.imaginary.cosh(),
-            -(self.real.sin() * self.imaginary.sinh()),
+            libm::cos(self.real) * libm::cosh(self.imaginary),
+            -(libm::sin(self.real) * libm::sinh(self.imaginary)),
             self.suffix,
         )
     }
@@ -282,27 +282,27 @@ impl ComplexValue {
         let (real, imaginary) = (2.0 * self.real, 2.0 * self.imaginary);
         let denominator = if self.imaginary.abs() < 1.0 {
             let circular = if cotangent {
-                self.real.sin()
+                libm::sin(self.real)
             } else {
-                self.real.cos()
+                libm::cos(self.real)
             };
-            let hyperbolic = self.imaginary.sinh();
+            let hyperbolic = libm::sinh(self.imaginary);
             2.0 * (circular * circular + hyperbolic * hyperbolic)
         } else if cotangent {
-            imaginary.cosh() - real.cos()
+            libm::cosh(imaginary) - libm::cos(real)
         } else {
-            real.cos() + imaginary.cosh()
+            libm::cos(real) + libm::cosh(imaginary)
         };
         let direction = if cotangent { -1.0 } else { 1.0 };
         if denominator.is_infinite() {
-            if 2.0 * real.sin() * (-imaginary.abs()).exp() != 0.0 {
+            if 2.0 * libm::sin(real) * libm::exp(-imaginary.abs()) != 0.0 {
                 return Err(ErrorKind::Num);
             }
             return Self::new(0.0, direction * self.imaginary.signum(), self.suffix);
         }
         Self::new(
-            real.sin() / denominator,
-            direction * (imaginary.sinh() / denominator),
+            libm::sin(real) / denominator,
+            direction * (libm::sinh(imaginary) / denominator),
             self.suffix,
         )
     }
@@ -310,8 +310,8 @@ impl ComplexValue {
     /// sinh(a + bi) = sinh a·cos b + i·cosh a·sin b.
     pub(super) fn hyperbolic_sine(self) -> Result<Self, ErrorKind> {
         Self::new(
-            self.real.sinh() * self.imaginary.cos(),
-            self.real.cosh() * self.imaginary.sin(),
+            libm::sinh(self.real) * libm::cos(self.imaginary),
+            libm::cosh(self.real) * libm::sin(self.imaginary),
             self.suffix,
         )
     }
@@ -319,8 +319,8 @@ impl ComplexValue {
     /// cosh(a + bi) = cosh a·cos b + i·sinh a·sin b.
     pub(super) fn hyperbolic_cosine(self) -> Result<Self, ErrorKind> {
         Self::new(
-            self.real.cosh() * self.imaginary.cos(),
-            self.real.sinh() * self.imaginary.sin(),
+            libm::cosh(self.real) * libm::cos(self.imaginary),
+            libm::sinh(self.real) * libm::sin(self.imaginary),
             self.suffix,
         )
     }
