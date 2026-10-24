@@ -183,3 +183,17 @@ fn mode_mult_spills_every_most_frequent_number_in_first_occurrence_order() {
         ))),
     );
 }
+
+#[test]
+fn mode_counts_negative_zero_as_zero() {
+    let draft = spill_workbook(&[
+        ("A1", "=MODE.SNGL(0,-0,1)"),
+        ("B1", "=MODE.MULT(-0,0,2,2)"),
+        ("C1", "=MODE(1,-0,0)"),
+    ]);
+    let sheet_id = draft.workbook().sheets()[0].id();
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    for (address, expected) in [("A1", 0.0), ("B1", 0.0), ("B2", 2.0), ("C1", 0.0)] {
+        assert_materialized_number(&calculation, sheet_id, address, expected);
+    }
+}

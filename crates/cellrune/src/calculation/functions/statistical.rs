@@ -643,9 +643,10 @@ fn modes_of(values: Vec<ArgumentValue>) -> Result<Vec<f64>, ErrorKind> {
             }
             Value::Blank | Value::Text(_) | Value::Logical(_) => continue,
         };
+        // Zero and negative zero are one value, as `coerce::compare` and the lookup indexes treat them.
         let entry = counts
-            .entry(number.to_bits())
-            .or_insert((number, 0, position));
+            .entry((number + 0.0).to_bits())
+            .or_insert((number + 0.0, 0, position));
         entry.1 += 1;
     }
     let most = counts

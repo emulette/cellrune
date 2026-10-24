@@ -21,6 +21,7 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `BITLSHIFT`, and `BITRSHIFT` with a negative shift, return `#NUM!` when the result passes
   `2^48 - 1`. A shift that pushed bits past 64 returned the truncated remainder, such as
   `BITLSHIFT(1073741825, 40)` returning 1099511627776.
+- `MODE`, `MODE.SNGL`, and `MODE.MULT` count `0` and `-0` as one value.
 
 ## [0.1.27] - 2026-10-24
 
