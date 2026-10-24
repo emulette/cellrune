@@ -430,8 +430,8 @@ The current engine audit of the frozen 0.1.8 workbooks records:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 250 | 16 | 0 | 0 | 0 |
-| CellRune formula oracle — Excel Online | 1,496 | 1,429 | 4 | 63 | 0 | 0 |
-| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,405 | 5 | 63 | 23 | 0 |
+| CellRune formula oracle — Excel Online | 1,496 | 1,484 | 5 | 7 | 0 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,461 | 5 | 7 | 23 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both
