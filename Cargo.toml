@@ -61,7 +61,7 @@ sha2 = { version = ">=0.10.1, <0.12", default-features = false }
 # the calculation limits bound but a small host thread stack may not.
 stacker = "0.1.25"
 system_alloc_stats = "0.2.0"
-tokio = { version = ">=1.44.2, <2", features = [
+tokio = { version = ">=1.53.3, <2", features = [
     "io-std",
     "macros",
     "rt-multi-thread",

@@ -495,6 +495,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   edit cannot fail the batch with `session.stale_result` or `session.revision_mismatch` after it was
   staged. Interop `WorkbookSession::prepare_changes_cancellable` stages a v1 batch with a cancellation
   token.
+- The MCP server requires `tokio` 1.53.3 or later, which fixes RUSTSEC-2026-0386 in
+  `AsyncFd`'s constructors.
 - The Python binding requires `pyo3` and `pyo3-build-config` 0.30.1 or a later 0.30 release.
   Supported Python versions are unchanged.
 - Formulas over overlapping ranges share the dependency areas those ranges are stored as, so a
