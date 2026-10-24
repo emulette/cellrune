@@ -1,6 +1,8 @@
 //! The dependencies a pass over new values resolves again: only those of the formulas whose
 //! targets can follow values, while the rest keep the nodes the last collection built.
 
+use std::collections::{BTreeSet, HashMap};
+
 use super::dependency_areas::AreaNodes;
 use super::{CellId, Engine, EvalContext, EvaluationBudget};
 use crate::calculation::ast::Expr;
@@ -8,7 +10,7 @@ use crate::calculation::functions::descriptor::DependencyKind;
 use crate::calculation::functions::{
     DynamicFunction, Evaluator, function_dependency_kind, function_evaluator, normalize_name,
 };
-use crate::calculation::graph::DependencyGraph;
+use crate::calculation::graph::{AreaId, DependencyGraph, DependencyNode, Schedule};
 
 impl Engine<'_> {
     /// The formulas whose dependency targets can depend on values.
@@ -56,6 +58,49 @@ impl Engine<'_> {
         let renumbered = graph.retain_referenced_areas();
         areas.renumber(&renumbered);
         Ok(graph.edge_count() <= self.options.limits().max_dependency_edges())
+    }
+
+    /// The formulas a pass after one whose evaluations of `stale` read a formula before it was
+    /// calculated evaluates again: those and every formula that waits for one of them in `graph`,
+    /// scheduled as `scheduled`. The others read only results that are final. Returns `None` when
+    /// the pass evaluates every formula: `graph` cycles or blocks other formulas than the last
+    /// pass did, or an array formula would calculate again.
+    pub(super) fn pass_dirty(
+        &self,
+        graph: &DependencyGraph,
+        scheduled: &Schedule,
+        stale: &BTreeSet<CellId>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Option<BTreeSet<CellId>>, ()> {
+        if scheduled.cycle_cells != *self.cycle_cells
+            || scheduled.blocked_cells != *self.blocked_cells
+        {
+            return Ok(None);
+        }
+        let mut dirty = BTreeSet::new();
+        // Whether an area holds a dirty cell. The schedule puts every formula an area holds
+        // before the formulas waiting for it, so an area's answer is known when first asked.
+        let mut dirty_areas = HashMap::new();
+        for cell in &scheduled.order {
+            if cancelled() {
+                return Err(());
+            }
+            if stale.contains(cell)
+                || graph.dependencies(*cell).is_some_and(|nodes| {
+                    nodes
+                        .iter()
+                        .any(|node| node_is_dirty(graph, *node, &dirty, &mut dirty_areas))
+                })
+            {
+                if self.legacy_array_range(*cell).is_some()
+                    || self.dynamic_array_range(*cell).is_some()
+                {
+                    return Ok(None);
+                }
+                dirty.insert(*cell);
+            }
+        }
+        Ok(Some(dirty))
     }
 
     /// Whether the dependency collection resolves `expr` without reading a value: only plain
@@ -120,10 +165,35 @@ impl Engine<'_> {
     }
 }
 
+fn node_is_dirty(
+    graph: &DependencyGraph,
+    node: DependencyNode,
+    dirty: &BTreeSet<CellId>,
+    dirty_areas: &mut HashMap<AreaId, bool>,
+) -> bool {
+    match node {
+        DependencyNode::Cell(cell) => dirty.contains(&cell),
+        DependencyNode::Area(area) => {
+            if let Some(known) = dirty_areas.get(&area) {
+                return *known;
+            }
+            let found = crate::calculation::stack::grow(|| {
+                graph
+                    .area(area)
+                    .iter()
+                    .any(|member| node_is_dirty(graph, *member, dirty, dirty_areas))
+            });
+            dirty_areas.insert(area, found);
+            found
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::Engine;
-    use crate::{CalculationOptions, CellAddress, FormulaText, WorkbookDraft};
+    use crate::calculation::value::Value;
+    use crate::{CalculationOptions, CellAddress, CellValue, FormulaText, WorkbookDraft};
 
     #[test]
     fn a_pass_resolves_again_only_formulas_whose_references_can_follow_values() {
@@ -161,5 +231,59 @@ mod tests {
             .map(|(row, _)| (0, row, 2))
             .collect::<Vec<_>>();
         assert_eq!(dependent, expected);
+    }
+
+    #[test]
+    fn a_pass_after_one_that_read_formulas_too_early_evaluates_only_those_and_their_readers() {
+        let calculate = |with_dynamic_reference: bool| {
+            let mut draft = WorkbookDraft::new();
+            let sheet = draft.workbook().sheets()[0].id();
+            let address = |row, column| CellAddress::from_indices(row, column).expect("address");
+            for row in 1..=200 {
+                draft
+                    .set_cell_value(
+                        sheet,
+                        address(row, 1),
+                        CellValue::number(f64::from(row)).expect("number"),
+                    )
+                    .expect("value edit");
+                draft
+                    .set_cell_formula(
+                        sheet,
+                        address(row, 2),
+                        FormulaText::from_xlsx(format!("A{row}*2")).expect("formula"),
+                    )
+                    .expect("formula edit");
+            }
+            draft
+                .set_cell_formula(
+                    sheet,
+                    address(1, 3),
+                    FormulaText::from_xlsx("5+5").expect("formula"),
+                )
+                .expect("formula edit");
+            if with_dynamic_reference {
+                // The first pass orders D1 by C1 alone and reads B2:B10 before they calculate.
+                for (column, text) in [(4, "SUM(INDIRECT(\"B1:B\"&C1))"), (5, "D1+1")] {
+                    draft
+                        .set_cell_formula(
+                            sheet,
+                            address(1, column),
+                            FormulaText::from_xlsx(text).expect("formula"),
+                        )
+                        .expect("formula edit");
+                }
+            }
+            let engine = Engine::evaluate(draft.workbook(), CalculationOptions::default());
+            (engine.reference_cells(), engine.cell_value((0, 1, 5)))
+        };
+        let (single_pass, _) = calculate(false);
+        let (reads, reader) = calculate(true);
+        assert_eq!(reader, Value::Number(111.0));
+        // Evaluating every formula again would read each cell the first pass read a second time.
+        assert!(
+            reads < single_pass + 50,
+            "{reads} reads against {single_pass}"
+        );
     }
 }

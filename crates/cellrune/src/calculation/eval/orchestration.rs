@@ -11,7 +11,7 @@ use super::{
     CompiledWorkbook, Engine, EvalContext, EvaluationBudget, VolatileFormulas,
     collect_column_extents, collect_workbook_layout, public_to_internal,
 };
-use crate::calculation::graph::{DependencyGraph, schedule_cancellable};
+use crate::calculation::graph::{DependencyGraph, Schedule, schedule_cancellable};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::pipeline::formula_volatility;
 use crate::calculation::runtime::CellId;
@@ -121,13 +121,20 @@ impl<'workbook> Engine<'workbook> {
             let value_dependent = engine.value_dependent_formulas(cancelled)?;
             let mut collected_regions = engine.array_regions.clone();
             let mut passes = 0;
+            // The formulas the last pass read before calculating them, when the next pass may
+            // evaluate only those and the formulas waiting for them.
+            let mut stale_pass = None;
             loop {
-                engine.read_formula_before_calculation.set(false);
-                if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
-                    return Err(());
-                }
+                let scheduled = schedule_cancellable(&collected.graph, cancelled)?;
+                let dirty = match &stale_pass {
+                    Some(stale) if !undeclared_dynamic_arrays => {
+                        engine.pass_dirty(&collected.graph, &scheduled, stale, cancelled)?
+                    }
+                    Some(_) | None => None,
+                };
+                let stale = engine.evaluate_pass(scheduled, dirty.as_ref(), cancelled)?;
                 passes += 1;
-                let ordered = !engine.read_formula_before_calculation.get();
+                let ordered = stale.is_empty();
                 if passes > 1 && (ordered || passes == MAX_DYNAMIC_REFERENCE_PASSES) {
                     break;
                 }
@@ -160,15 +167,20 @@ impl<'workbook> Engine<'workbook> {
                         schedule.cycle_cells == *engine.cycle_cells
                             && schedule.blocked_cells == *engine.blocked_cells
                     };
+                // Formulas the collection limits differently read differently, so every formula
+                // calculates again.
+                let limits_changed = next.limited != *engine.dependency_limit_cells;
                 engine.dependency_limit_cells = Arc::new(next.limited);
                 collected.graph = next.graph;
                 collected.areas = next.areas;
                 if settled {
                     break;
                 }
+                stale_pass = (!limits_changed).then_some(stale);
             }
-        } else if !engine.evaluate_schedule_subset(&collected.graph, None, cancelled) {
-            return Err(());
+        } else {
+            let scheduled = schedule_cancellable(&collected.graph, cancelled)?;
+            engine.evaluate_pass(scheduled, None, cancelled)?;
         }
         engine.dependencies = Arc::new(collected.graph);
         engine.dependency_areas = Arc::new(collected.areas);
@@ -375,38 +387,53 @@ impl<'workbook> Engine<'workbook> {
         !cancelled()
     }
 
-    fn evaluate_schedule_subset(
+    /// Evaluates the formulas of `scheduled` in its order, or only those in `dirty`, whose
+    /// earlier results it clears first so that reading one before it calculates is seen, and
+    /// returns the formulas that read a formula before it was calculated.
+    fn evaluate_pass(
         &mut self,
-        dependencies: &DependencyGraph,
+        scheduled: Schedule,
         dirty: Option<&BTreeSet<CellId>>,
         cancelled: &impl Fn() -> bool,
-    ) -> bool {
+    ) -> Result<BTreeSet<CellId>, ()> {
         self.lookup_indexes.get_mut().clear();
-        if dirty.is_none() {
-            self.results.clear();
-            self.numeric_decimal_traces.clear();
-            self.retained_results.clear();
-            self.dynamic_spills.clear();
-            self.array_regions.retain(|region| !region.provisional);
+        match dirty {
+            None => {
+                self.results.clear();
+                self.numeric_decimal_traces.clear();
+                self.retained_results.clear();
+                self.dynamic_spills.clear();
+                self.array_regions.retain(|region| !region.provisional);
+            }
+            Some(dirty) => {
+                for cell in dirty {
+                    self.results.remove(cell);
+                    self.numeric_decimal_traces.remove(cell);
+                    self.retained_results.remove(cell);
+                }
+            }
         }
-        let Ok(scheduled) = schedule_cancellable(dependencies, cancelled) else {
-            return false;
-        };
         self.cycle_cells = Arc::new(scheduled.cycle_cells);
         self.blocked_cells = Arc::new(scheduled.blocked_cells);
+        let mut stale = BTreeSet::new();
         for cell in scheduled.order {
             if dirty.is_some_and(|cells| !cells.contains(&cell)) {
                 continue;
             }
             if cancelled() {
-                return false;
+                return Err(());
             }
             self.evaluated_cells.insert(cell);
-            if self.evaluate_one(cell, cancelled).is_err() {
-                return false;
+            self.read_formula_before_calculation.set(false);
+            self.evaluate_one(cell, cancelled)?;
+            if self.read_formula_before_calculation.get() {
+                stale.insert(cell);
             }
         }
-        !cancelled()
+        if cancelled() {
+            return Err(());
+        }
+        Ok(stale)
     }
 
     pub(super) fn evaluate_one(
