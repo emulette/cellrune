@@ -47,7 +47,7 @@ are not part of this binary notice.
 | `schemars` | `1.2.1` | `MIT` |
 | `serde` | `1.0.229` | `MIT OR Apache-2.0` |
 | `serde_core` | `1.0.229` | `MIT OR Apache-2.0` |
-| `serde_json` | `1.0.151` | `MIT OR Apache-2.0` |
+| `serde_json` | `1.0.154` | `MIT OR Apache-2.0` |
 | `sha2` | `0.11.0` | `MIT OR Apache-2.0` |
 | `simd-adler32` | `0.3.10` | `MIT` |
 | `stacker` | `0.1.25` | `MIT OR Apache-2.0` |
@@ -304,7 +304,7 @@ limitations under the License.
 ### License text 3
 
 Components: `adler2 2.0.1`, `dyn-clone 1.0.20`, `itoa 1.0.18`, `once_cell 1.21.4`, `portable-atomic 1.14.0`,
-  `ref-cast 1.0.26`, `serde 1.0.229`, `serde_core 1.0.229`, `serde_json 1.0.151`, `typed-path
+  `ref-cast 1.0.26`, `serde 1.0.229`, `serde_core 1.0.229`, `serde_json 1.0.154`, `typed-path
   0.12.3`, `zmij 1.0.23`
 
 Source filenames: `LICENSE-MIT`
@@ -1205,7 +1205,7 @@ DEALINGS IN THE SOFTWARE.
 ### License text 14
 
 Components: `dyn-clone 1.0.20`, `itoa 1.0.18`, `libc 0.2.189`, `ref-cast 1.0.26`, `serde 1.0.229`, `serde_core
-  1.0.229`, `serde_json 1.0.151`, `typed-path 0.12.3`
+  1.0.229`, `serde_json 1.0.154`, `typed-path 0.12.3`
 
 Source filenames: `LICENSE-APACHE`
 

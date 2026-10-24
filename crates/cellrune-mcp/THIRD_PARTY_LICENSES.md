@@ -90,7 +90,7 @@ are not part of this binary notice.
 | `schemars` | `1.2.1` | `MIT` |
 | `serde` | `1.0.229` | `MIT OR Apache-2.0` |
 | `serde_core` | `1.0.229` | `MIT OR Apache-2.0` |
-| `serde_json` | `1.0.151` | `MIT OR Apache-2.0` |
+| `serde_json` | `1.0.154` | `MIT OR Apache-2.0` |
 | `sha2` | `0.11.0` | `MIT OR Apache-2.0` |
 | `sharded-slab` | `0.1.7` | `MIT` |
 | `simd-adler32` | `0.3.10` | `MIT` |
@@ -382,7 +382,7 @@ Components: `adler2 2.0.1`, `ambient-authority 0.0.2`, `cap-primitives 4.0.3`, `
   1.0.20`, `fs-set-times 0.20.3`, `io-extras 0.19.0`, `io-lifetimes 2.0.4`, `io-lifetimes 3.0.1`,
   `itoa 1.0.18`, `linux-raw-sys 0.12.1`, `once_cell 1.21.4`, `pin-project-lite 0.2.17`, `ref-cast
   1.0.26`, `rustix 1.1.4`, `rustix-linux-procfs 0.1.1`, `serde 1.0.229`, `serde_core 1.0.229`,
-  `serde_json 1.0.151`, `thiserror 2.0.19`, `typed-path 0.12.3`, `unicode-ident 1.0.24`, `wasi
+  `serde_json 1.0.154`, `thiserror 2.0.19`, `typed-path 0.12.3`, `unicode-ident 1.0.24`, `wasi
   0.11.1+wasi-snapshot-preview1`, `zmij 1.0.23`
 
 Source filenames: `LICENSE-MIT`
@@ -2241,7 +2241,7 @@ DEALINGS IN THE SOFTWARE.
 ### License text 25
 
 Components: `dyn-clone 1.0.20`, `itoa 1.0.18`, `libc 0.2.189`, `ref-cast 1.0.26`, `serde 1.0.229`, `serde_core
-  1.0.229`, `serde_json 1.0.151`, `thiserror 2.0.19`, `typed-path 0.12.3`, `unicode-ident 1.0.24`,
+  1.0.229`, `serde_json 1.0.154`, `thiserror 2.0.19`, `typed-path 0.12.3`, `unicode-ident 1.0.24`,
   `utf8parse 0.2.2`
 
 Source filenames: `LICENSE-APACHE`
