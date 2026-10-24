@@ -48,6 +48,10 @@ impl WorkbookDraft {
     /// All mutations are performed on one staged workbook clone. If any operation or final
     /// workbook invariant fails, `self` remains unchanged.
     ///
+    /// This call places no limit on formula rewriting or table materialization and cannot be
+    /// cancelled. Use [`WorkbookCalculationSession::apply_changes`](crate::WorkbookCalculationSession::apply_changes)
+    /// to apply a batch within the session's limits and cancellation.
+    ///
     /// # Errors
     ///
     /// Returns a [`ValidationError`] for an invalid sheet, cell, name, range, visibility state,

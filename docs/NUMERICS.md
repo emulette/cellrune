@@ -179,8 +179,10 @@ Under `Ieee754` no path consults the exact trace, so none is computed.
 #### Not part of this: fifteen-digit display
 
 `=1.1-1` shows `0.1` in Excel and `0.10000000000000009` here, and that is a *display* difference,
-not this correction. Excel stores the same residue — `=(1.1-1)=0.1` is `FALSE` in Excel too — and
-renders to fifteen significant digits. No arithmetic policy changes that value, and none should.
+not this correction: Excel renders to fifteen significant digits. Comparing the value is a separate
+difference. Excel returns `TRUE` for `=(1.1-1)=0.1` (the committed oracle case
+`curated:arithmetic:c015`), while CellRune compares the two numbers exactly and returns `FALSE`.
+The near-zero correction above changes neither result.
 
 #### Not part of this: signed zero
 

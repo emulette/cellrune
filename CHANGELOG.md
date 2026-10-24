@@ -25,6 +25,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - Inserting, deleting, or moving rows and columns rewrites both ends of a range whose end is in
   parentheses, such as `(A3):A5`. Only the unparenthesized end moved, so the range silently
   changed.
+- The 0.1.27 entry below states the catalog as 497 official names and 498 accepted entries.
+- `docs/NUMERICS.md` no longer claims that Excel returns `FALSE` for `=(1.1-1)=0.1`; Excel
+  returns `TRUE` and CellRune returns `FALSE`.
 
 ## [0.1.27] - 2026-10-24
 
@@ -374,8 +377,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   hides count as hidden rows, so options 0, 2, 4, and 6 keep them. Functions 1 to 13 take
   references, 14 to 19 one array and `k`, and a calculated array keeps its hidden rows and nested
   totals; 3-D references, a missing `k`, and out-of-range arguments are `#VALUE!`. `SUBTOTAL` is
-  unchanged. With these and the other functions added in 0.1.27, the catalog has 495 official
-  names and 496 accepted entries.
+  unchanged. With these and the other functions added in 0.1.27, the catalog has 497 official
+  names and 498 accepted entries.
 - `FREQUENCY` and `MODE.MULT` spill one column. `FREQUENCY` counts the numbers at or below each
   bin and above the next lower one, in the given bin order, then those above the highest bin;
   text and blank bins add no row, a logical value in a data array constant is ignored, and an
