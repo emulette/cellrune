@@ -469,7 +469,11 @@ async function assertDeleteSheet() {
     "=#REF!+1",
   );
   const delta = await workbook.recalculate();
-  assert.deepEqual([delta.mode, delta.reason], ["full", "topology_changed"]);
+  // The deletion leaves every formula of the workbook to calculate again.
+  assert.deepEqual(
+    [delta.mode, delta.reason],
+    ["full", "dirty_set_covers_workbook"],
+  );
   assert.deepEqual(delta.removedMaterializedCells, [
     { sheetId: 2, sheetName: "Data", address: "B1" },
   ]);

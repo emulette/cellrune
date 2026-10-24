@@ -519,7 +519,8 @@ def assert_delete_sheet() -> None:
         cell = workbook.read_range("Sheet1", "A1", "A1", limit=1)["cells"][0]
         assert cell["formula"] == "=#REF!+1"
         delta = workbook.recalculate()
-        assert (delta["mode"], delta["reason"]) == ("full", "topology_changed")
+        # The deletion leaves every formula of the workbook to calculate again.
+        assert (delta["mode"], delta["reason"]) == ("full", "dirty_set_covers_workbook")
         assert delta["removed_materialized_cells"] == [
             {"sheet_id": 2, "sheet_name": "Data", "address": "B1"}
         ]
