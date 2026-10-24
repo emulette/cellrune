@@ -31,7 +31,8 @@ use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{
     affected_formulas, formula_cells, formula_cells_from_workbook, moved_cells,
-    number_format_formulas, sheet_name_readers, volatile_input_formulas,
+    number_format_formulas, sheet_name_readers, table_readers, tables_covered_by,
+    volatile_input_formulas,
 };
 pub use limits::{CancellationToken, SessionLimits};
 pub use transaction::{
@@ -311,13 +312,40 @@ impl WorkbookCalculationSession {
             )
             .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
             {
-                // The readers' results can change, so their own readers recalculate too.
                 Some(readers) => {
-                    let changed = calculation_changed_cells.to_mut();
-                    changed.extend(readers.iter().copied());
-                    changed.sort_unstable();
-                    changed.dedup();
-                    edited_formulas.extend(readers);
+                    add_readers(
+                        &mut calculation_changed_cells,
+                        &mut edited_formulas,
+                        readers,
+                    );
+                }
+                None => {
+                    local_formula_edits = false;
+                    edited_formulas.clear();
+                }
+            }
+        }
+        // Table edits change the formulas reading the tables, which recompile in place unless a
+        // defined name names one of them.
+        if local_formula_edits
+            && receipt.local_table_edits()
+            && let Some(compiled) = &self.compiled
+        {
+            match table_readers(
+                self.workbook(),
+                draft.workbook(),
+                compiled,
+                receipt.changed_table_ids(),
+                &cancelled,
+            )
+            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            {
+                Some(readers) => {
+                    add_readers(
+                        &mut calculation_changed_cells,
+                        &mut edited_formulas,
+                        readers,
+                    );
                 }
                 None => {
                     local_formula_edits = false;
@@ -327,7 +355,9 @@ impl WorkbookCalculationSession {
         }
         // Compiling formulas one by one costs more than compiling the workbook once they are
         // most of it, so a move or a sheet change that reached that many compiles it again.
-        if (!receipt.moved_cell_sheets().is_empty() || !receipt.sheet_names_changed().is_empty())
+        if (!receipt.moved_cell_sheets().is_empty()
+            || !receipt.sheet_names_changed().is_empty()
+            || receipt.local_table_edits())
             && self.compiled.as_ref().is_some_and(|compiled| {
                 edited_formulas.len().saturating_mul(2) > compiled.formula_count()
             })
@@ -490,10 +520,23 @@ impl WorkbookCalculationSession {
             .compiled
             .as_ref()
             .is_some_and(|compiled| compiled.limits() != options.limits());
+        // A table whose readers all recompile in place with the pending formula edits needs no
+        // compiling.
         let table_topology_changed = match &self.compiled {
-            Some(compiled) => !compiled
-                .table_topology_matches(self.workbook(), &cancelled)
-                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
+            Some(compiled) => {
+                let changed = compiled
+                    .changed_table_topologies(self.workbook(), &cancelled)
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+                !changed.is_empty()
+                    && !tables_covered_by(
+                        self.workbook(),
+                        compiled,
+                        &changed,
+                        &self.formula_edits,
+                        &cancelled,
+                    )
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            }
             None => false,
         };
         let structural_rebuild = no_state
@@ -1188,6 +1231,20 @@ impl std::error::Error for ApplyChangesError {
 }
 
 /// Returns the changed cells that held or now hold a formula.
+/// Adds `readers`, formulas whose results an edit changes without rewriting them, to the edited
+/// formulas and to the changed cells, so that their own readers recalculate too.
+fn add_readers(
+    changed: &mut Cow<'_, [CalculationCellId]>,
+    edited: &mut BTreeSet<CalculationCellId>,
+    readers: BTreeSet<CalculationCellId>,
+) {
+    let cells = changed.to_mut();
+    cells.extend(readers.iter().copied());
+    cells.sort_unstable();
+    cells.dedup();
+    edited.extend(readers);
+}
+
 fn formula_edit_cells(
     before: &WorkbookSnapshot,
     after: &WorkbookSnapshot,

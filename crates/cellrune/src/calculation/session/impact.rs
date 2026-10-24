@@ -5,7 +5,7 @@ use super::super::functions::descriptor::Volatility;
 use super::super::runtime::CellId;
 use crate::{
     CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, SheetId,
-    SheetName, WorkbookSnapshot,
+    SheetName, TableId, TableName, WorkbookSnapshot,
 };
 
 const CHARGED_WORK_POLL_INTERVAL: u32 = 256;
@@ -323,4 +323,79 @@ pub(super) fn sheet_name_readers(
             .filter_map(|cell| internal_to_public(workbook, cell))
             .collect(),
     ))
+}
+
+/// Returns the formulas whose results table edits of `tables` can change without rewriting them:
+/// those reading the tables, naming one by its name before or after, or standing in a table's
+/// range before or after, whose structured references without a table name follow it. Returns
+/// `None` when a defined name names one of the tables.
+pub(super) fn table_readers(
+    before: &WorkbookSnapshot,
+    after: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    tables: &[TableId],
+    cancelled: &impl Fn() -> bool,
+) -> Result<Option<BTreeSet<CalculationCellId>>, ()> {
+    let ids = tables.iter().copied().collect::<BTreeSet<_>>();
+    let mut names = BTreeSet::new();
+    let mut ranges = Vec::new();
+    for workbook in [before, after] {
+        for id in &ids {
+            if let Some(location) = workbook.table_location_by_id(*id) {
+                let sheet = &workbook.sheets()[location.sheet_index];
+                let table = &sheet.tables()[location.table_index];
+                names.insert(table.display_name().lookup_key().to_owned());
+                ranges.push((sheet.id(), table.range()));
+            }
+        }
+    }
+    let names_table = |text: &str| {
+        crate::calculation::formula_references::formula_references(text).is_some_and(|references| {
+            references.tables.iter().any(|table| {
+                TableName::new(table.as_str()).is_ok_and(|table| names.contains(table.lookup_key()))
+            })
+        })
+    };
+    if after
+        .defined_names()
+        .iter()
+        .any(|name| names_table(name.formula().as_str()))
+    {
+        return Ok(None);
+    }
+    let mut charger = ImpactWorkCharger {
+        charged: 0,
+        cancelled,
+    };
+    let mut readers = compiled
+        .table_readers(&ids, &names, cancelled)?
+        .into_iter()
+        .filter_map(|cell| internal_to_public(before, cell))
+        .collect::<BTreeSet<_>>();
+    for cell in compiled.formula_cells() {
+        charger.charge()?;
+        if let Some(public) = internal_to_public(before, cell)
+            && ranges.iter().any(|(sheet, range)| {
+                public.sheet_id() == *sheet && range.contains(public.address())
+            })
+        {
+            readers.insert(public);
+        }
+    }
+    Ok(Some(readers))
+}
+
+/// Whether every formula reading one of `tables` is among `edits`, which recompile in place
+/// with what they read now.
+pub(super) fn tables_covered_by(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    tables: &BTreeSet<TableId>,
+    edits: &BTreeSet<CalculationCellId>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<bool, ()> {
+    Ok(compiled
+        .table_readers(tables, &BTreeSet::new(), cancelled)?
+        .into_iter()
+        .all(|cell| internal_to_public(workbook, cell).is_some_and(|cell| edits.contains(&cell))))
 }

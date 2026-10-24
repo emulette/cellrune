@@ -25,6 +25,9 @@ pub struct EditReceipt {
     /// The names that find another sheet, or a sheet where none was, because a sheet was added
     /// or renamed without changing a defined name or a table.
     pub(super) sheet_names_changed: Vec<SheetName>,
+    /// Whether the tables in `changed_table_ids` changed by table edits that changed no defined
+    /// name, which change only the formulas reading those tables.
+    pub(super) local_table_edits: bool,
     pub(super) inverse: Option<Box<EditInverse>>,
 }
 
@@ -61,6 +64,7 @@ impl EditReceipt {
             number_formats_changed: self.number_formats_changed,
             moved_cell_sheets: clone_copy_slice(&self.moved_cell_sheets, cancelled)?,
             sheet_names_changed: self.sheet_names_changed.clone(),
+            local_table_edits: self.local_table_edits,
             inverse: self.inverse.clone(),
         })
     }
@@ -128,6 +132,13 @@ impl EditReceipt {
     /// sheet names or the number of sheets, read differently.
     pub(crate) fn sheet_names_changed(&self) -> &[SheetName] {
         &self.sheet_names_changed
+    }
+
+    /// Returns whether table edits changed the tables in [`Self::changed_table_ids`] as
+    /// [`Self::cell_formulas_changed_topology_only`] counts them: the formulas reading those tables
+    /// read differently.
+    pub(crate) const fn local_table_edits(&self) -> bool {
+        self.local_table_edits
     }
 
     pub(crate) const fn number_formats_changed(&self) -> bool {

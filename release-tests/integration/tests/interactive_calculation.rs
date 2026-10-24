@@ -3263,6 +3263,88 @@ fn adding_or_renaming_a_sheet_recalculates_only_the_formulas_reading_its_names()
 }
 
 #[test]
+fn a_table_resize_recalculates_only_the_formulas_reading_the_table() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut changes = vec![
+        WorkbookChange::set_cell_value(sheet_id, address("A1"), CellValue::Text("h1".to_owned())),
+        WorkbookChange::set_cell_value(sheet_id, address("B1"), CellValue::Text("h2".to_owned())),
+    ];
+    for row in 2..=12 {
+        for column in 1..=2 {
+            changes.push(WorkbookChange::set_cell_value(
+                sheet_id,
+                CellAddress::from_indices(row, column).expect("address"),
+                number(f64::from(row * column)),
+            ));
+        }
+    }
+    for (cell, text) in [
+        ("D1", "SUM(T[h1])"),
+        ("D2", "ROWS(T[h2])"),
+        ("D3", "SUM(A2:A20)"),
+    ] {
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            address(cell),
+            formula(text),
+        ));
+    }
+    for row in 4..=20 {
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 4).expect("address"),
+            formula(&format!("{row}*2")),
+        ));
+    }
+    changes.push(WorkbookChange::CreateTable {
+        sheet_id,
+        range: CellRange::new(address("A1"), address("B6")).expect("range"),
+        name: Some(cellrune::TableName::new("T").expect("table name")),
+    });
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    let table_id = session.workbook().sheets()[0].tables()[0].id();
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::SetTableRange {
+                table_id,
+                range: CellRange::new(address("A1"), address("B9")).expect("range"),
+            }]),
+        )
+        .expect("table resize");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("recalculation");
+    assert_eq!(
+        (delta.mode(), delta.reason()),
+        (
+            CalculationExecutionMode::Incremental,
+            CalculationDecisionReason::DirtySubset,
+        )
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed result"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+    // D1 and D2 read the table; D3 reads plain cells, and the others read nothing.
+    assert_eq!(delta.evaluated_count(), 2);
+}
+
+#[test]
 fn random_dynamic_edit_sequences_match_a_fresh_full_calculation() {
     let modes = random_edit_sequences(EditProfile::Dynamic, 101..=108, false);
     assert!(

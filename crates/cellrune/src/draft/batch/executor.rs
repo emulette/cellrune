@@ -95,6 +95,7 @@ impl WorkbookDraft {
                 number_formats_changed: false,
                 moved_cell_sheets: Vec::new(),
                 sheet_names_changed: Vec::new(),
+                local_table_edits: false,
                 inverse: None,
             });
         }
@@ -143,6 +144,7 @@ impl WorkbookDraft {
         let mut number_formats_changed = false;
         let mut moved_cell_sheets = BTreeSet::new();
         let mut sheet_names_changed = Vec::new();
+        let mut local_table_edits = false;
         let mut semantic_changed = false;
         // Every ID the workbook or this batch has used stays taken, including those of sheets
         // deleted since, so an added sheet takes the one after the highest.
@@ -156,6 +158,10 @@ impl WorkbookDraft {
             .unwrap_or(0);
 
         for change in batch.changes() {
+            // A table edit that changes no defined name changes, for calculation, only the
+            // formulas reading the table, which a session recompiles in place.
+            let names_before = is_table_change(change).then(|| defined_names.clone());
+            let mut table_edited = false;
             match change {
                 WorkbookChange::SetCellValue {
                     sheet_id,
@@ -788,7 +794,7 @@ impl WorkbookDraft {
                         new_display_name,
                     )? {
                         workbook_changed = true;
-                        topology_changed = true;
+                        table_edited = true;
                         semantic_changed = true;
                     }
                 }
@@ -819,7 +825,7 @@ impl WorkbookDraft {
                         new_name,
                     )? {
                         workbook_changed = true;
-                        topology_changed = true;
+                        table_edited = true;
                         semantic_changed = true;
                     }
                 }
@@ -848,7 +854,7 @@ impl WorkbookDraft {
                         *first_data_row,
                         *last_data_row,
                     )? {
-                        topology_changed = true;
+                        table_edited = true;
                         semantic_changed = true;
                     }
                 }
@@ -878,7 +884,7 @@ impl WorkbookDraft {
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed = true;
-                    topology_changed = true;
+                    table_edited = true;
                     semantic_changed = true;
                 }
                 WorkbookChange::ConvertTableToRange { table_id } => {
@@ -914,7 +920,7 @@ impl WorkbookDraft {
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed = true;
-                    topology_changed = true;
+                    table_edited = true;
                     semantic_changed = true;
                 }
                 WorkbookChange::SetTableRange { table_id, range } => {
@@ -949,7 +955,7 @@ impl WorkbookDraft {
                         table_formula_locations =
                             super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                         workbook_changed = true;
-                        topology_changed = true;
+                        table_edited = true;
                         semantic_changed = true;
                     }
                 }
@@ -963,7 +969,7 @@ impl WorkbookDraft {
                                 range,
                             }));
                         changed_table_ids.insert(*table_id);
-                        topology_changed = true;
+                        table_edited = true;
                         semantic_changed = true;
                     }
                 }
@@ -1171,6 +1177,14 @@ impl WorkbookDraft {
                     }
                 }
             }
+            if table_edited {
+                if names_before.is_some_and(|before| before != defined_names) {
+                    topology_changed = true;
+                } else {
+                    cell_formulas_changed = true;
+                    local_table_edits = true;
+                }
+            }
         }
 
         for sheet in &sheets {
@@ -1257,6 +1271,7 @@ impl WorkbookDraft {
             number_formats_changed,
             moved_cell_sheets: moved_cell_sheets.into_iter().collect(),
             sheet_names_changed,
+            local_table_edits,
             inverse,
         })
     }
@@ -1325,6 +1340,20 @@ fn table_range(sheets: &[Sheet], table_id: TableId) -> Option<CellRange> {
         .flat_map(Sheet::tables)
         .find(|table| table.id() == table_id)
         .map(Table::range)
+}
+
+/// Whether `change` edits a table's name, columns, or range.
+fn is_table_change(change: &WorkbookChange) -> bool {
+    matches!(
+        change,
+        WorkbookChange::RenameTable { .. }
+            | WorkbookChange::RenameTableColumn { .. }
+            | WorkbookChange::ResizeTableRows { .. }
+            | WorkbookChange::CreateTable { .. }
+            | WorkbookChange::ConvertTableToRange { .. }
+            | WorkbookChange::SetTableRange { .. }
+            | WorkbookChange::WidenTableColumns { .. }
+    )
 }
 
 #[cfg(test)]

@@ -1097,9 +1097,11 @@ than guessing a name from a different XLSX crate (`calamine`,
   and rewrote; adding a sheet, or renaming one without changing a defined
   name or a table, counts as editing the formulas it rewrote, the formulas
   naming the added or either renamed name, and those calling `SHEET`,
-  `SHEETS`, or `CELL`. Either compiles the workbook again (`TopologyChanged`)
-  when those formulas are more than half of the workbook's or a defined name
-  reads the sheet names.
+  `SHEETS`, or `CELL`; a table edit that changes no defined name counts as
+  editing the formulas reading the table, naming it, or standing in its range.
+  Each compiles the workbook again (`TopologyChanged`) when those formulas are
+  more than half of the workbook's or a defined name reads the sheet or table
+  names.
   Forced `Incremental` fails closed when
   unsafe, including after formula edits. When the only
   options that differ from the installed calculation are the `TODAY()` serial,

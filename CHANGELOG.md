@@ -443,10 +443,13 @@ inventories, and measurements belong in the linked documentation rather than in 
   of compiling the workbook again with `Full` and `TopologyChanged`. Adding a sheet, or renaming
   one without changing a defined name or a table, likewise recompiles only the formulas it
   rewrote, the formulas naming the added or either renamed name, and those calling `SHEET`,
-  `SHEETS`, or `CELL`, and recalculates their readers. A change whose formulas are more than half
-  of the workbook's, an array formula among them, a defined name reading the sheet names, or a
-  batch with another change that needs compiling still compiles the workbook again. Results are
-  those of a full calculation.
+  `SHEETS`, or `CELL`, and recalculates their readers. A table edit that changes no defined name
+  (creating, renaming, resizing, widening, or converting a table, or renaming a column) likewise
+  recompiles the formulas reading the table, naming it by its old or new name, or standing in its
+  old or new range. A change whose formulas are more than half of the workbook's, an array formula
+  among them, a defined name reading the sheet or table names, or a batch with another change
+  that needs compiling still compiles the workbook again. Results are those of a full
+  calculation.
 - A full calculation whose pass read a formula before calculating it evaluates again, in the
   next pass, only those formulas and the formulas that wait for them, keeping the others' results,
   which read only final values; a pass that cycles or blocks other formulas, limits other

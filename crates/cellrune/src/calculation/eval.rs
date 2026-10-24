@@ -186,11 +186,25 @@ impl VolatileFormulas {
 }
 
 impl CompiledWorkbook {
+    #[cfg(test)]
     pub(super) fn table_topology_matches(
         &self,
         workbook: &WorkbookSnapshot,
         cancelled: &impl Fn() -> bool,
     ) -> Result<bool, ()> {
+        Ok(self
+            .changed_table_topologies(workbook, cancelled)?
+            .is_empty())
+    }
+
+    /// Returns the tables formulas read whose geometry in `workbook` differs from the compiled
+    /// one.
+    pub(super) fn changed_table_topologies(
+        &self,
+        workbook: &WorkbookSnapshot,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<BTreeSet<crate::TableId>, ()> {
+        let mut changed = BTreeSet::new();
         for (table_id, topology) in &self.table_topologies {
             if cancelled() {
                 return Err(());
@@ -198,10 +212,45 @@ impl CompiledWorkbook {
             if !table_dependency_by_id_cancellable(workbook, *table_id, cancelled)?
                 .is_some_and(|current| current.topology() == *topology)
             {
-                return Ok(false);
+                changed.insert(*table_id);
             }
         }
-        Ok(true)
+        Ok(changed)
+    }
+
+    /// Returns the formula cells whose formula reads one of `tables` or names a table by one of
+    /// the `names` lookup keys.
+    pub(super) fn table_readers(
+        &self,
+        tables: &BTreeSet<crate::TableId>,
+        names: &BTreeSet<String>,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Vec<CellId>, ()> {
+        let mut readers = Vec::new();
+        for (cell, parsed) in self.asts.iter() {
+            if cancelled() {
+                return Err(());
+            }
+            let reads_table = self.dependency_targets.get(cell).is_some_and(|targets| {
+                targets.iter().any(|target| {
+                    matches!(target, dependency::DependencyTarget::TableIdentity(table)
+                        if tables.contains(&table.table_id()))
+                })
+            });
+            if reads_table
+                || (!names.is_empty()
+                    && super::formula_references::expression_references(parsed.root())
+                        .tables
+                        .iter()
+                        .any(|name| {
+                            crate::TableName::new(name.as_str())
+                                .is_ok_and(|name| names.contains(name.lookup_key()))
+                        }))
+            {
+                readers.push(*cell);
+            }
+        }
+        Ok(readers)
     }
 
     pub(super) const fn limits(&self) -> CalculationLimits {
