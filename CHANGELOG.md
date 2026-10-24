@@ -463,9 +463,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   others, unless the pass changed the array areas or the last collection reached
   `max_dependency_edges`; results are the same.
 - A call whose omitted arguments take defaults, such as `IF` without its third argument, no
-  longer copies its arguments each time it is evaluated: a formula or a `LAMBDA` whose calls are
-  evaluated again, as in the function `MAP` and the other helpers invoke, keeps the prepared
-  argument lists, with the same results.
+  longer copies its arguments each time it is evaluated: a formula, or a `LAMBDA` that `MAP` or
+  another helper invokes, keeps the prepared argument lists of the calls it evaluates again, with
+  the same results.
 - Formulas that read a range, such as `SUM`, `COUNTBLANK`, `AND`, the conditional aggregates
   and counts, the database functions, lookups, and array operands, and the indexes exact and
   approximate lookups and criteria share, find the range's stored cells in one ordered walk of
