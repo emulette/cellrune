@@ -76,7 +76,6 @@ impl<'workbook> Engine<'workbook> {
             planner.edges = 0;
             engine.dependencies = Arc::new(DependencyGraph::default());
             engine.results.clear();
-            engine.numeric_decimal_traces.clear();
             engine.retained_results.clear();
             engine.dynamic_spills.clear();
             engine.cycle_cells = Arc::new(BTreeSet::new());

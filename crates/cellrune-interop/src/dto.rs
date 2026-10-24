@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Transport-safe arithmetic compatibility policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub enum ArithmeticSemanticsDto {
-    /// Apply Excel's narrow near-zero correction to a proven cancellation.
+    /// Apply Excel's fifteen-digit rules: near-zero correction, comparison, and rounding.
     #[default]
     #[serde(rename = "excel_near_zero")]
     ExcelNearZero,

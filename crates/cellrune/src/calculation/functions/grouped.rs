@@ -112,6 +112,7 @@ fn percent_values(engine: &Engine<'_>, subset: Value, all: Value) -> Value {
         &subset,
         &all,
         engine.calculation_limits().max_text_bytes(),
+        super::util::fifteen_digit_rules(engine),
     )
 }
 
@@ -123,8 +124,8 @@ fn group_by(
     let [fields_expr, values_expr, callable_expr, optional @ ..] = args else {
         return Err(ErrorKind::Value);
     };
-    let fields = engine.eval_array_with_trace(context, fields_expr)?;
-    let values = engine.eval_array_with_trace(context, values_expr)?;
+    let fields = engine.eval_array_evaluation(context, fields_expr)?;
+    let values = engine.eval_array_evaluation(context, values_expr)?;
     validate_group_inputs(engine, context, &[&fields, &values])?;
     let aggregate = resolve_aggregate(engine, context, callable_expr)?;
     let headers = parse_field_headers(engine, context, optional.first())?;
@@ -197,9 +198,9 @@ fn pivot_by(
     else {
         return Err(ErrorKind::Value);
     };
-    let row_fields = engine.eval_array_with_trace(context, row_expr)?;
-    let column_fields = engine.eval_array_with_trace(context, column_expr)?;
-    let values = engine.eval_array_with_trace(context, values_expr)?;
+    let row_fields = engine.eval_array_evaluation(context, row_expr)?;
+    let column_fields = engine.eval_array_evaluation(context, column_expr)?;
+    let values = engine.eval_array_evaluation(context, values_expr)?;
     validate_group_inputs(engine, context, &[&row_fields, &column_fields, &values])?;
     let aggregate = resolve_aggregate(engine, context, callable_expr)?;
     let headers = parse_field_headers(engine, context, optional.first())?;
@@ -458,14 +459,13 @@ pub(super) fn invoke_aggregate(
     }
     Ok(match result {
         ScopeValue::Scalar(evaluated) => evaluated,
-        ScopeValue::Array(evaluated) if evaluated.array.is_scalar() => ScalarEvaluation {
-            value: evaluated.array.data[0].clone(),
-            decimal_trace: evaluated.decimal_traces[0],
-        },
+        ScopeValue::Array(evaluated) if evaluated.array.is_scalar() => {
+            ScalarEvaluation::new(evaluated.array.data[0].clone())
+        }
         ScopeValue::Missing
         | ScopeValue::Array(_)
         | ScopeValue::Reference(_)
-        | ScopeValue::Callable(_) => ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)),
+        | ScopeValue::Callable(_) => ScalarEvaluation::new(Value::Error(ErrorKind::Value)),
     })
 }
 
@@ -479,18 +479,13 @@ fn column_scope_value(
     engine.ensure_array_cells(members.len() as u64)?;
     let rows = u32::try_from(members.len()).map_err(|_| ErrorKind::Num)?;
     let mut data = Vec::with_capacity(members.len());
-    let mut decimal_traces = Vec::with_capacity(members.len());
     for row in members {
         poll_cancellation(context)?;
         data.push(values.array.at(*row, column).clone());
-        decimal_traces.push(values.decimal_at(*row, column));
     }
-    Ok(ScopeValue::Array(Arc::new(ArrayEvaluation {
-        array: Array {
-            rows,
-            cols: 1,
-            data,
-        },
-        decimal_traces,
-    })))
+    Ok(ScopeValue::Array(Arc::new(ArrayEvaluation::new(Array {
+        rows,
+        cols: 1,
+        data,
+    }))))
 }

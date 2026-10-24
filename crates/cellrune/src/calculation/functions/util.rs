@@ -1,7 +1,7 @@
 use super::super::ArithmeticSemantics;
 use super::super::ast::Expr;
-use super::super::decimal::{DecimalTrace, RationalTrace, is_excel_near_zero_cancellation};
 use super::super::eval::{Engine, EvalContext};
+use super::super::excel_digits::cancel_near_zero;
 use super::super::limits::CalculationLimitKind;
 use super::super::runtime::{CellId, Rect};
 use super::super::scope::ScopeValue;
@@ -12,23 +12,13 @@ use super::{DynamicFunction, Evaluator, function_evaluator, let_scope_value};
 #[derive(Debug, Clone)]
 pub(super) struct ArgumentValue {
     pub(super) value: Value,
-    pub(super) decimal_trace: Option<DecimalTrace>,
     pub(super) from_collection: bool,
     pub(super) from_single_cell_reference: bool,
 }
 
-/// Whether referenced numbers carry the decimal traces that only Excel-compatible summation
-/// consumes. Building a trace costs a decimal conversion and an allocation per cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DecimalTraces {
-    Collect,
-    Skip,
-}
-
-/// Which referenced cells become argument values, and whether their numbers carry decimal traces.
+/// Which referenced cells become argument values.
 struct CellSelection<'filter, F> {
     include: &'filter F,
-    decimal_traces: DecimalTraces,
 }
 
 fn include_every_cell(_: CellId) -> bool {
@@ -40,13 +30,7 @@ pub(super) fn collect_argument_values(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
-    collect_argument_values_with_policy(
-        engine,
-        context,
-        args,
-        SheetSpanPolicy::Unsupported,
-        DecimalTraces::Skip,
-    )
+    collect_argument_values_with_policy(engine, context, args, SheetSpanPolicy::Unsupported)
 }
 
 pub(super) fn collect_argument_values_with_policy(
@@ -54,7 +38,6 @@ pub(super) fn collect_argument_values_with_policy(
     context: EvalContext<'_>,
     args: &[Expr],
     sheet_span_policy: SheetSpanPolicy,
-    decimal_traces: DecimalTraces,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut visited_cells = 0_u64;
     collect_argument_values_with_counter_and_policy(
@@ -63,7 +46,6 @@ pub(super) fn collect_argument_values_with_policy(
         args,
         &mut visited_cells,
         sheet_span_policy,
-        decimal_traces,
     )
 }
 
@@ -79,7 +61,6 @@ pub(super) fn collect_argument_values_with_counter(
         args,
         visited_cells,
         SheetSpanPolicy::Unsupported,
-        DecimalTraces::Skip,
     )
 }
 
@@ -89,7 +70,6 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
     args: &[Expr],
     visited_cells: &mut u64,
     sheet_span_policy: SheetSpanPolicy,
-    decimal_traces: DecimalTraces,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     collect_filtered_argument_values(
         engine,
@@ -99,7 +79,6 @@ pub(super) fn collect_argument_values_with_counter_and_policy(
         sheet_span_policy,
         &CellSelection {
             include: &include_every_cell,
-            decimal_traces,
         },
     )
 }
@@ -112,7 +91,6 @@ pub(super) fn collect_argument_values_including(
     args: &[Expr],
     sheet_span_policy: SheetSpanPolicy,
     include: &impl Fn(CellId) -> bool,
-    decimal_traces: DecimalTraces,
 ) -> Result<Vec<ArgumentValue>, ErrorKind> {
     let mut visited_cells = 0_u64;
     collect_filtered_argument_values(
@@ -121,10 +99,7 @@ pub(super) fn collect_argument_values_including(
         args,
         &mut visited_cells,
         sheet_span_policy,
-        &CellSelection {
-            include,
-            decimal_traces,
-        },
+        &CellSelection { include },
     )
 }
 
@@ -165,25 +140,17 @@ fn collect_filtered_argument_values(
                 collect_rect_values(engine, context, rect, visited_cells, cells, &mut values)?;
             }
         } else {
-            let evaluated = engine.eval_array_with_trace(context, arg)?;
+            let evaluated = engine.eval_array_evaluation(context, arg)?;
             let from_collection = !evaluated.array.is_scalar() || matches!(arg, Expr::Array(_));
             *visited_cells = visited_cells
                 .checked_add(evaluated.array.data.len() as u64)
                 .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
             engine.ensure_array_cells(*visited_cells)?;
-            values.extend(
-                evaluated
-                    .array
-                    .data
-                    .into_iter()
-                    .zip(evaluated.decimal_traces)
-                    .map(|(value, decimal_trace)| ArgumentValue {
-                        value,
-                        decimal_trace,
-                        from_collection,
-                        from_single_cell_reference: false,
-                    }),
-            );
+            values.extend(evaluated.array.data.into_iter().map(|value| ArgumentValue {
+                value,
+                from_collection,
+                from_single_cell_reference: false,
+            }));
         }
     }
     Ok(values)
@@ -229,7 +196,6 @@ pub(super) fn collect_callable_argument_values(
             SheetSpanPolicy::CollectAcrossSheets,
             &CellSelection {
                 include: &include_every_cell,
-                decimal_traces: DecimalTraces::Collect,
             },
             &mut values,
         )?;
@@ -251,7 +217,6 @@ fn collect_scope_values(
             charge_array_cells(engine, visited_cells, 1)?;
             values.push(ArgumentValue {
                 value: Value::Blank,
-                decimal_trace: None,
                 from_collection: false,
                 from_single_cell_reference: false,
             });
@@ -260,7 +225,6 @@ fn collect_scope_values(
             charge_array_cells(engine, visited_cells, 1)?;
             values.push(ArgumentValue {
                 value: evaluated.value,
-                decimal_trace: evaluated.decimal_trace,
                 from_collection: false,
                 from_single_cell_reference: false,
             });
@@ -273,10 +237,8 @@ fn collect_scope_values(
                     .data
                     .iter()
                     .cloned()
-                    .zip(evaluated.decimal_traces.iter().copied())
-                    .map(|(value, decimal_trace)| ArgumentValue {
+                    .map(|value| ArgumentValue {
                         value,
-                        decimal_trace,
                         from_collection: true,
                         from_single_cell_reference: false,
                     }),
@@ -344,25 +306,13 @@ fn collect_rect_values(
             if !(selection.include)(cell) {
                 continue;
             }
-            let (value, decimal_trace) = if row > populated_row_end {
-                (engine.read_blank_reference_cell(context)?, None)
-            } else if selection.decimal_traces == DecimalTraces::Collect {
-                let (value, trace) = engine.read_stored_reference_cell_with_trace(
-                    context,
-                    cell,
-                    stored.at(row, column),
-                )?;
-                let trace = trace.filter(|_| matches!(value, Value::Number(_)));
-                (value, trace)
+            let value = if row > populated_row_end {
+                engine.read_blank_reference_cell(context)?
             } else {
-                (
-                    engine.read_stored_reference_cell(context, cell, stored.at(row, column))?,
-                    None,
-                )
+                engine.read_stored_reference_cell(context, cell, stored.at(row, column))?
             };
             values.push(ArgumentValue {
                 value,
-                decimal_trace,
                 from_collection: true,
                 from_single_cell_reference: rect.is_single_cell(),
             });
@@ -376,15 +326,7 @@ pub(super) fn required_number(
     context: EvalContext<'_>,
     expr: &Expr,
 ) -> Result<f64, ErrorKind> {
-    required_number_with_trace(engine, context, expr).map(|(number, _)| number)
-}
-
-pub(super) fn required_number_with_trace(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
-    expr: &Expr,
-) -> Result<(f64, Option<DecimalTrace>), ErrorKind> {
-    engine.eval_number_with_trace(context, expr)
+    super::super::coerce::to_number(&engine.eval_scalar(context, expr))
 }
 
 pub(super) fn required_text(
@@ -395,97 +337,61 @@ pub(super) fn required_text(
     super::super::coerce::to_text(&engine.eval_scalar(context, expr))
 }
 
-/// Exact running value an [`ExcelSum`] can carry beside its `f64` total.
-///
-/// Two representations implement it: parsed decimals, for kernels that add their inputs as spelled;
-/// and rationals, for kernels such as `NPV` that transform each input before adding it. Both fail
-/// closed — an operation that does not fit the bounded representation returns `None`, and the
-/// accumulator then stops claiming to know the exact total rather than guessing that it is zero.
-pub(super) trait ExactTrace: Copy {
-    const EXACT_ZERO: Self;
-
-    fn combined_with(self, right: Self) -> Option<Self>;
-
-    fn is_exact_zero(self) -> bool;
+/// Whether Excel's fifteen-significant-digit rules apply: rounding reads a scaled quotient to
+/// fifteen digits and comparison treats numbers that differ only past them as equal. Under
+/// `ArithmeticSemantics::Ieee754` both use the binary values as they are.
+pub(super) fn fifteen_digit_rules(engine: &Engine<'_>) -> bool {
+    matches!(
+        engine.arithmetic_semantics(),
+        ArithmeticSemantics::ExcelNearZero
+    )
 }
 
-impl ExactTrace for DecimalTrace {
-    const EXACT_ZERO: Self = Self::ZERO;
-
-    fn combined_with(self, right: Self) -> Option<Self> {
-        self.add(right)
-    }
-
-    fn is_exact_zero(self) -> bool {
-        self.is_zero()
-    }
-}
-
-impl ExactTrace for RationalTrace {
-    const EXACT_ZERO: Self = Self::ZERO;
-
-    fn combined_with(self, right: Self) -> Option<Self> {
-        self.add(right)
-    }
-
-    fn is_exact_zero(self) -> bool {
-        self.is_zero()
-    }
-}
-
-/// Policy-aware streaming total shared by every kernel that adds numbers up.
+/// Streaming total shared by every kernel that adds numbers up.
 ///
-/// Two things make this the single place the sum is formed. First, `Iterator::sum` for `f64` folds
-/// from `-0.0`, which is the true additive identity for floats because `-0.0 + x == x` holds even
-/// when `x` is `-0.0`; that makes an empty sum negative zero, while Excel reports `0` for a sum over
-/// no numbers. Second, a running total is a chain of additions, so it accumulates exactly the
-/// residue the operator path corrects — without the same correction here, one release would answer
-/// `=A1+A2+A3` and `=SUM(A1:A3)` differently, which is not a compatibility mode but a
-/// contradiction.
+/// `Iterator::sum` for `f64` folds from `-0.0`, which makes an empty sum negative zero, while Excel
+/// reports `0` for a sum over no numbers; the total here starts at `0.0`.
 ///
-/// The correction is applied at each step against the term that produced it, matching what
-/// `a + b + c` does in the operator path, and only when the exact total is zero. Ordinary and
-/// conditional aggregates, `SUMPRODUCT`, and `NPV` all read the policy through this one type, so
-/// none of them can drift from the others.
-pub(super) struct ExcelSum<Trace: ExactTrace = DecimalTrace> {
-    excel_near_zero: bool,
+/// `SUM`, `AVERAGE`, `AVERAGEA`, `SUBTOTAL`, and `AGGREGATE` correct a total whose final addition
+/// cancels to near zero, as the root of a formula does (see [`cancel_near_zero`]): Excel returns
+/// `0` for `SUM(0.1,0.2,-0.3)` but keeps the residue of `SUM(0.1,0.2,-0.3,0)`, whose final addition
+/// adds zero. The conditional aggregates, `SUMPRODUCT`, and `NPV` do not correct their totals.
+pub(super) struct ExcelSum {
+    correct_final_cancellation: bool,
     total: f64,
-    exact_total: Option<Trace>,
+    final_addition: Option<(f64, f64)>,
 }
 
-impl<Trace: ExactTrace> ExcelSum<Trace> {
-    pub(super) fn new(engine: &Engine<'_>) -> Self {
+impl ExcelSum {
+    /// A total that is never corrected.
+    pub(super) const fn plain() -> Self {
         Self {
-            excel_near_zero: matches!(
-                engine.arithmetic_semantics(),
-                ArithmeticSemantics::ExcelNearZero
-            ),
+            correct_final_cancellation: false,
             total: 0.0,
-            exact_total: Some(Trace::EXACT_ZERO),
+            final_addition: None,
         }
     }
 
-    pub(super) fn add_with_trace(&mut self, value: f64, trace: Option<Trace>) {
-        let next = self.total + value;
-        if !self.excel_near_zero {
-            self.total = next;
-            return;
-        }
-
-        self.exact_total = self
-            .exact_total
-            .and_then(|total| total.combined_with(trace?));
-        if self.exact_total.is_some_and(ExactTrace::is_exact_zero)
-            && is_excel_near_zero_cancellation(self.total, value, next)
-        {
-            self.total = 0.0;
-        } else {
-            self.total = next;
+    /// A total whose final addition is corrected under Excel's rules.
+    pub(super) fn correcting_final_cancellation(engine: &Engine<'_>) -> Self {
+        Self {
+            correct_final_cancellation: fifteen_digit_rules(engine),
+            ..Self::plain()
         }
     }
 
-    pub(super) const fn total(&self) -> f64 {
-        self.total
+    pub(super) fn add(&mut self, value: f64) {
+        self.final_addition = Some((self.total, value));
+        self.total += value;
+    }
+
+    pub(super) fn total(&self) -> f64 {
+        match self.final_addition {
+            Some((before, value)) if self.correct_final_cancellation => {
+                cancel_near_zero(before, value, self.total)
+            }
+            _ => self.total,
+        }
     }
 }
 
@@ -503,7 +409,6 @@ pub(super) fn excel_numeric_arguments_with_policy(
     args: &[Expr],
     sheet_span_policy: SheetSpanPolicy,
 ) -> Result<Vec<f64>, ErrorKind> {
-    // Statistics convert values to plain numbers, so they skip decimal trace construction.
     let mut visited_cells = 0_u64;
     excel_numbers(collect_filtered_argument_values(
         engine,
@@ -513,7 +418,6 @@ pub(super) fn excel_numeric_arguments_with_policy(
         sheet_span_policy,
         &CellSelection {
             include: &include_every_cell,
-            decimal_traces: DecimalTraces::Skip,
         },
     )?)
 }

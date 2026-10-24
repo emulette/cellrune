@@ -335,7 +335,7 @@ impl Parser<'_> {
     /// empty nodes at the reference's end.
     fn trimmed(&mut self, range: SpannedExpr, mode: TrimMode) -> Result<SpannedExpr, ParseError> {
         let end = SourceSpan::empty(range.span.end);
-        let mode_literal = || Expr::Number(NumberLiteral::from_number(mode.mode()));
+        let mode_literal = || Expr::Number(NumberLiteral::new(mode.mode()));
         self.track(mode_literal(), end)?;
         self.track(mode_literal(), end)?;
         let span = range.span;

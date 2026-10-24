@@ -205,7 +205,7 @@ fn materialize_default(value: contract::ArgumentDefaultValue) -> Option<Expr> {
     }
 }
 
-pub(in crate::calculation) fn call_function_with_trace(
+pub(in crate::calculation) fn call_function_evaluation(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     name: &str,
@@ -215,17 +215,17 @@ pub(in crate::calculation) fn call_function_with_trace(
         return engine.scalar_from_scope(context, &value);
     }
     let Some(descriptor) = descriptor::resolve(name) else {
-        return super::scope::ScalarEvaluation::untracked(Value::Error(ErrorKind::Unsupported));
+        return super::scope::ScalarEvaluation::new(Value::Error(ErrorKind::Unsupported));
     };
     if !call_shape_is_valid(descriptor, args) {
-        return super::scope::ScalarEvaluation::untracked(Value::Error(ErrorKind::Value));
+        return super::scope::ScalarEvaluation::new(Value::Error(ErrorKind::Value));
     }
     let written = args;
     let prepared = CallArguments::for_call(context, descriptor, args);
     let args = prepared.as_slice();
     let context = context.with_arguments(args);
     if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args) {
-        return super::scope::ScalarEvaluation::untracked(Value::Error(kind));
+        return super::scope::ScalarEvaluation::new(Value::Error(kind));
     }
     match descriptor.evaluator() {
         Evaluator::Dynamic(kernel::DynamicFunction::Map) => {
@@ -257,7 +257,7 @@ pub(in crate::calculation) fn call_function_with_trace(
             let value = lambda_scope_value(context, args, None);
             engine.scalar_from_scope(context, &value)
         }
-        _ => super::scope::ScalarEvaluation::untracked(dispatch_scalar(
+        _ => super::scope::ScalarEvaluation::new(dispatch_scalar(
             descriptor, engine, context, args, written,
         )),
     }
@@ -345,7 +345,7 @@ pub(in crate::calculation) fn intrinsic_scope_value(
     let descriptor = descriptor::resolve(name)?;
     if !call_shape_is_valid(descriptor, args) {
         return Some(super::scope::ScopeValue::Scalar(
-            super::scope::ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)),
+            super::scope::ScalarEvaluation::new(Value::Error(ErrorKind::Value)),
         ));
     }
     match descriptor.evaluator() {
@@ -366,7 +366,7 @@ pub(in crate::calculation) fn invoke_scope_value(
     args: &[Expr],
 ) -> super::scope::ScopeValue {
     if let Some(kind) = value.engine_issue() {
-        return super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
+        return super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::new(
             Value::Error(kind),
         ));
     }
@@ -379,9 +379,9 @@ pub(in crate::calculation) fn invoke_scope_value(
         {
             super::scope::ScopeValue::Scalar(evaluated)
         }
-        _ => super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::untracked(
-            Value::Error(ErrorKind::Value),
-        )),
+        _ => super::scope::ScopeValue::Scalar(super::scope::ScalarEvaluation::new(Value::Error(
+            ErrorKind::Value,
+        ))),
     }
 }
 
@@ -462,35 +462,34 @@ pub(super) fn call_function_array(
     match descriptor.array_evaluator()? {
         ArrayEvaluator::Legacy(function) => {
             legacy::call_legacy_array(engine, context, function, args)
-                .map(|result| result.map(ArrayEvaluation::untracked))
+                .map(|result| result.map(ArrayEvaluation::new))
         }
         ArrayEvaluator::Information(function) => {
             information::call_array(engine, context, function, args)
-                .map(|result| result.map(ArrayEvaluation::untracked))
+                .map(|result| result.map(ArrayEvaluation::new))
         }
         ArrayEvaluator::Elementwise(function) => Some(
             call_elementwise_array(engine, context, function.scalar_function(), args)
-                .map(ArrayEvaluation::untracked),
+                .map(ArrayEvaluation::new),
         ),
         ArrayEvaluator::Dynamic(function) => {
             Some(helper_array_with_trace(engine, context, function, args))
         }
         ArrayEvaluator::Map => Some(dynamic::map_array_with_trace(engine, context, args)),
         ArrayEvaluator::Array(function) => {
-            Some(array::call_array(engine, context, function, args).map(ArrayEvaluation::untracked))
+            Some(array::call_array(engine, context, function, args).map(ArrayEvaluation::new))
         }
-        ArrayEvaluator::Regression(function) => Some(
-            regression::call_array(engine, context, function, args).map(ArrayEvaluation::untracked),
-        ),
-        ArrayEvaluator::ModernText(function) => Some(
-            modern_text::call_array(engine, context, function, args)
-                .map(ArrayEvaluation::untracked),
-        ),
+        ArrayEvaluator::Regression(function) => {
+            Some(regression::call_array(engine, context, function, args).map(ArrayEvaluation::new))
+        }
+        ArrayEvaluator::ModernText(function) => {
+            Some(modern_text::call_array(engine, context, function, args).map(ArrayEvaluation::new))
+        }
         ArrayEvaluator::Grouped(function) => {
             Some(grouped::call_array(engine, context, function, args))
         }
         ArrayEvaluator::XLookup => {
-            Some(lookup::call_xlookup_array(engine, context, args).map(ArrayEvaluation::untracked))
+            Some(lookup::call_xlookup_array(engine, context, args).map(ArrayEvaluation::new))
         }
     }
 }

@@ -1,6 +1,5 @@
 use super::super::ast::Expr;
 use super::super::criteria::CompiledCriteria;
-use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Rect;
 use super::super::scope::ScopeValue;
@@ -13,7 +12,7 @@ use super::moments::VarianceKind;
 use super::normalize_name;
 use super::statistical::variance_value;
 use super::util::{
-    ArgumentValue, DecimalTraces, ExcelSum, collect_argument_values_including,
+    ArgumentValue, ExcelSum, collect_argument_values_including,
     collect_argument_values_with_policy, collect_callable_argument_values, excel_numbers,
     required_number,
 };
@@ -92,16 +91,6 @@ enum Aggregate {
     Product,
 }
 
-impl Aggregate {
-    /// Only summation consults decimal traces, to cancel decimal residue near zero.
-    const fn decimal_traces(self) -> DecimalTraces {
-        match self {
-            Self::Sum | Self::Average => DecimalTraces::Collect,
-            Self::Min | Self::Max | Self::Product => DecimalTraces::Skip,
-        }
-    }
-}
-
 fn aggregate_numbers(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -116,7 +105,6 @@ fn aggregate_numbers(
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
-        aggregate.decimal_traces(),
     ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
@@ -129,31 +117,33 @@ fn aggregate_collected(
     values: Vec<ArgumentValue>,
     aggregate: Aggregate,
 ) -> Value {
-    let mut sum = ExcelSum::new(engine);
+    let mut sum = ExcelSum::correcting_final_cancellation(engine);
     let mut result = 0.0_f64;
     let mut count = 0_u64;
     for ArgumentValue {
         value,
-        decimal_trace,
         from_collection,
         ..
     } in values
     {
-        let (number, decimal_trace) = match value {
-            Value::Number(number) => (number, decimal_trace),
+        let number = match value {
+            Value::Number(number) => number,
             Value::Logical(logical) if !from_collection => {
-                let number = if logical { 1.0 } else { 0.0 };
-                (number, DecimalTrace::from_number(number))
+                if logical {
+                    1.0
+                } else {
+                    0.0
+                }
             }
             Value::Text(text) if !from_collection => match text.parse::<f64>() {
-                Ok(number) => (number, DecimalTrace::from_number(number)),
+                Ok(number) => number,
                 Err(_) => return Value::Error(ErrorKind::Value),
             },
             Value::Error(kind) => return Value::Error(kind),
             Value::Blank | Value::Text(_) | Value::Logical(_) => continue,
         };
         match aggregate {
-            Aggregate::Sum | Aggregate::Average => sum.add_with_trace(number, decimal_trace),
+            Aggregate::Sum | Aggregate::Average => sum.add(number),
             Aggregate::Min => {
                 result = if count == 0 {
                     number
@@ -190,7 +180,6 @@ fn count_numbers(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
-        DecimalTraces::Skip,
     ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
@@ -227,7 +216,6 @@ fn count_nonblank(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) 
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
-        DecimalTraces::Skip,
     ) {
         Ok(values) => count_nonblank_collected(&values),
         Err(kind) => Value::Error(kind),
@@ -303,12 +291,6 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         &args[1..],
         SheetSpanPolicy::CollectAcrossSheets,
         &|cell| !engine.parsed_expr(cell).is_some_and(contains_subtotal_call),
-        // Operations 1 and 9 are AVERAGE and SUM, the only ones that sum.
-        if operation == 1.0 || operation == 9.0 {
-            DecimalTraces::Collect
-        } else {
-            DecimalTraces::Skip
-        },
     ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
@@ -446,7 +428,7 @@ fn scan_conditional_aggregate(
     {
         return value;
     }
-    let mut total = ExcelSum::new(engine);
+    let mut total = ExcelSum::plain();
     let mut count = 0_u64;
     let row_end = |range: &Rect| (range.row_start + iter_rows as u32).saturating_sub(1);
     let mut criteria_cells = parsed
@@ -484,18 +466,18 @@ fn scan_conditional_aggregate(
                 parsed.value_range.row_start + row_offset,
                 parsed.value_range.col_start + col_offset,
             );
-            match engine.read_stored_reference_cell_with_trace(
+            match engine.read_stored_reference_cell(
                 context,
                 (parsed.value_range.sheet, row, column),
                 value_cells.at(row, column),
             ) {
                 Err(kind) => return Value::Error(kind),
-                Ok((Value::Number(number), trace)) => {
-                    total.add_with_trace(number, trace);
+                Ok(Value::Number(number)) => {
+                    total.add(number);
                     count += 1;
                 }
-                Ok((Value::Error(kind), _)) => return Value::Error(kind),
-                Ok((Value::Blank | Value::Text(_) | Value::Logical(_), _)) => {}
+                Ok(Value::Error(kind)) => return Value::Error(kind),
+                Ok(Value::Blank | Value::Text(_) | Value::Logical(_)) => {}
             }
         }
     }
@@ -523,23 +505,20 @@ fn indexed_conditional_aggregate(
                 range.row_start + offset / width,
                 range.col_start + offset % width,
             );
-            (cell, engine.cell_value(cell))
+            engine.cell_value(cell)
         })
         .collect::<Vec<_>>();
-    if cells
-        .iter()
-        .any(|(_, value)| matches!(value, Value::Error(_)))
-    {
+    if cells.iter().any(|value| matches!(value, Value::Error(_))) {
         return None;
     }
     if let Err(kind) = matches.charge(engine, context, cells.len() as u64)? {
         return Some(Value::Error(kind));
     }
-    let mut total = ExcelSum::new(engine);
+    let mut total = ExcelSum::plain();
     let mut count = 0_u64;
-    for (cell, value) in cells {
+    for value in cells {
         if let Value::Number(number) = value {
-            total.add_with_trace(number, engine.numeric_decimal_trace(cell));
+            total.add(number);
             count += 1;
         }
     }

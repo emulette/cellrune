@@ -1,6 +1,5 @@
 use std::fmt;
 
-use super::decimal::DecimalTrace;
 use super::functions::BuiltinCallable;
 use super::value::ErrorKind;
 
@@ -172,30 +171,15 @@ pub enum FormulaDisplayMode {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct NumberLiteral {
     value: f64,
-    decimal_trace: Option<DecimalTrace>,
 }
 
 impl NumberLiteral {
-    pub(super) fn from_literal(value: f64, literal: &str) -> Self {
-        Self {
-            value,
-            decimal_trace: DecimalTrace::from_literal(literal),
-        }
-    }
-
-    pub(super) fn from_number(value: f64) -> Self {
-        Self {
-            value,
-            decimal_trace: DecimalTrace::from_number(value),
-        }
+    pub(super) const fn new(value: f64) -> Self {
+        Self { value }
     }
 
     pub(super) const fn value(self) -> f64 {
         self.value
-    }
-
-    pub(super) const fn decimal_trace(self) -> Option<DecimalTrace> {
-        self.decimal_trace
     }
 }
 
@@ -308,7 +292,7 @@ impl Clone for Expr {
 
 impl Expr {
     pub(super) fn number(value: f64) -> Self {
-        Self::Number(NumberLiteral::from_number(value))
+        Self::Number(NumberLiteral::new(value))
     }
 
     #[allow(dead_code)]

@@ -1,7 +1,6 @@
 use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_number, to_text};
 use super::super::criteria::CompiledCriteria;
-use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::{broadcast_shape, element_at};
@@ -532,12 +531,9 @@ fn kernel_sumproduct(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
-    // Read with traces: the terms this sums are products of exact decimals, so they can cancel the
-    // same way a chain of `+` and `-` does. Discarding the traces here would leave `SUMPRODUCT`
-    // outside the arithmetic policy and disagreeing with `SUM` on identical data.
     let mut arrays = Vec::with_capacity(args.len());
     for arg in args {
-        match engine.eval_array_with_trace(context, arg) {
+        match engine.eval_array_evaluation(context, arg) {
             Ok(evaluated) => arrays.push(evaluated),
             Err(kind) => return Value::Error(kind),
         }
@@ -555,25 +551,21 @@ fn kernel_sumproduct(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
     if let Err(kind) = engine.ensure_array_cells(cells) {
         return Value::Error(kind);
     }
-    let mut total = ExcelSum::new(engine);
+    // Excel does not correct a near-zero total of products: `SUMPRODUCT({0.1,0.2,-0.3})` keeps its
+    // residue where `SUM` returns zero.
+    let mut total = ExcelSum::plain();
     for row in 0..rows {
         for col in 0..cols {
             let mut product = 1.0_f64;
-            let mut product_trace = Some(DecimalTrace::ONE);
             for evaluated in &arrays {
-                let (number, trace) = match element_at(&evaluated.array, row, col) {
+                product *= match element_at(&evaluated.array, row, col) {
                     Value::Error(kind) => return Value::Error(*kind),
-                    Value::Number(number) => (*number, evaluated.decimal_at(row, col)),
-                    // Excel treats a non-numeric cell as zero rather than as an error, and zero is
-                    // exactly representable, so the term stays traceable.
-                    Value::Logical(_) | Value::Text(_) | Value::Blank => {
-                        (0.0, Some(DecimalTrace::ZERO))
-                    }
+                    Value::Number(number) => *number,
+                    // Excel treats a non-numeric cell as zero rather than as an error.
+                    Value::Logical(_) | Value::Text(_) | Value::Blank => 0.0,
                 };
-                product *= number;
-                product_trace = product_trace.and_then(|running| running.multiply(trace?));
             }
-            total.add_with_trace(product, product_trace);
+            total.add(product);
         }
     }
     Value::Number(total.total())

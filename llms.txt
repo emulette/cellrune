@@ -1725,14 +1725,25 @@ than guessing a name from a different XLSX crate (`calamine`,
   `interop.display_format.request_invalid`.
 - **Two numeric-compatibility axes, both defaulting to Excel's behavior rather
   than to what 0.1.2 did.** `ArithmeticSemantics`: `ExcelNearZero` (default)
-  applies Excel's narrow correction only when the exact decimal/rational trace
-  is zero and the binary residue is within `1e-15` of the cancelling operands'
-  relative scale. Thus `=0.1+0.2-0.3` is `0`, while
-  `=100.1-100-0.1` retains `-5.689893001203927e-15`, matching the committed
-  Excel saved cache. `Ieee754` leaves every residue. The correction reaches
-  the operator path, the array path, and the running totals behind `SUM`,
-  `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`, `SUMPRODUCT`, and `NPV`,
-  so those cannot disagree with each other.
+  corrects the addition or subtraction a formula ends with, unparenthesized,
+  and the final addition of `SUM`, `AVERAGE`, `SUBTOTAL`, and `AGGREGATE`
+  totals, to zero when the result is below eight units in the last place of
+  the larger operand, as Excel does. Thus `=0.1+0.2-0.3` and
+  `=SUM(0.1,0.2,-0.3)` are `0`, while `=(0.1+0.2-0.3)`, `=0.1+0.2-0.3=0`
+  (`FALSE`), `=100.1-100-0.1`, `SUMIF(S)`, `SUMPRODUCT`, and `NPV` keep the
+  residue. `Ieee754` leaves every residue. The default also compares numbers
+  that differ only past their fifteenth significant digit as equal in the
+  comparison operators, `SWITCH`, and `COUNTIF`-style and database criteria
+  (`=0.1+0.2=0.3` is `TRUE`), and reads a scaled quotient to fifteen digits
+  before rounding in `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `MROUND`,
+  `CEILING`, `FLOOR` and their variants, and `PERCENTRANK`
+  (`ROUND(1.005,2)` is `1.01`); lookups, sorting, and `UNIQUE` keep exact
+  equality. `Ieee754` compares and rounds the binary values. In either mode a
+  number joined to text is rounded to fifteen significant digits and written
+  in scientific notation past twenty characters (`2/3&""` is
+  `0.666666666666667`, `1E+20&""` is `1E+20`), and a number written in a
+  formula keeps fifteen significant digits (`1234567890123456` reads as
+  `1234567890123450`).
   `FinancialSolverSemantics`: `ExcelIterationBudget` (default) applies
   Microsoft's per-function budget — 20 iterations/`1e-7` for `IRR` and `RATE`,
   100/`1e-8` for `XIRR` — so inputs Excel abandons yield `#NUM!` here too;

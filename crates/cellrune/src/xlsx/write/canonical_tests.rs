@@ -69,7 +69,6 @@ fn empty_plan(source: &WorkbookSnapshot) -> MaterializationPlan {
     let calculation = CalculationSnapshot::new(
         BTreeMap::new(),
         BTreeMap::new(),
-        BTreeMap::new(),
         source,
         CalculationOptions::default(),
     );
@@ -1204,7 +1203,6 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
     let legacy_calculation = CalculationSnapshot::new(
         BTreeMap::new(),
         legacy_materialized,
-        BTreeMap::new(),
         &expected,
         CalculationOptions::default(),
     );
@@ -1241,7 +1239,6 @@ fn semantic_verification_only_allows_declared_legacy_array_followers() {
     let direct_calculation = CalculationSnapshot::new(
         direct_cells,
         direct_materialized,
-        BTreeMap::new(),
         &expected,
         CalculationOptions::default(),
     );
@@ -1377,7 +1374,6 @@ fn incomplete_materialization_alone_requires_host_recalculation_flags() {
     let calculation = CalculationSnapshot::new(
         cells,
         materialized,
-        BTreeMap::new(),
         &expected,
         CalculationOptions::default(),
     );

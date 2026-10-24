@@ -13,9 +13,7 @@ use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::aggregate::{contains_subtotal_call, subtotal_operation};
 use super::statistical::{RankInterval, median_of, mode_of, order_statistic_of, percentile_of};
-use super::util::{
-    DecimalTraces, collect_argument_values_including, excel_numbers, required_number,
-};
+use super::util::{collect_argument_values_including, excel_numbers, required_number};
 
 pub(super) fn aggregate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     match evaluate(engine, context, args) {
@@ -58,11 +56,6 @@ fn evaluate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Res
         let hidden_row = skip_hidden_rows && engine.is_row_hidden(cell);
         !nested_total && !hidden_row
     };
-    let traces = if matches!(function, 1 | 9) {
-        DecimalTraces::Collect
-    } else {
-        DecimalTraces::Skip
-    };
     let mut values = Vec::new();
     for source in sources {
         // The reference form takes references only: a constant array is `#VALUE!`.
@@ -78,7 +71,6 @@ fn evaluate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Res
                 std::slice::from_ref(source),
                 SheetSpanPolicy::ReturnExcelError(ErrorKind::Value),
                 &include,
-                traces,
             )
             .map_err(Value::Error)?,
         );

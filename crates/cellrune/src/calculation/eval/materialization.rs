@@ -95,17 +95,6 @@ impl Engine<'_> {
                         value
                     },
                 );
-                let trace_index = if array.is_scalar() {
-                    0
-                } else {
-                    array_row as usize * array.cols as usize + array_column as usize
-                };
-                if let Some(Some(trace)) = evaluated.decimal_traces.get(trace_index)
-                    && (array.is_scalar() || (array_row < array.rows && array_column < array.cols))
-                {
-                    self.numeric_decimal_traces
-                        .insert((range.sheet, row, column), *trace);
-                }
             }
         }
         Ok(())
@@ -160,12 +149,6 @@ impl Engine<'_> {
                         value
                     },
                 );
-                let trace_index = (row - range.row_start) as usize * array.cols as usize
-                    + (column - range.col_start) as usize;
-                if let Some(Some(trace)) = evaluated.decimal_traces.get(trace_index) {
-                    self.numeric_decimal_traces
-                        .insert((range.sheet, row, column), *trace);
-                }
             }
         }
         self.dynamic_spills.insert(anchor, range);

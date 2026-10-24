@@ -390,25 +390,12 @@ fn snapshot_from_incremental_engine_cancellable(
     }
     let materialized =
         build_incremental_materialization_cancellable(workbook, engine, &cells, cancelled)?;
-    let mut traces = BTreeMap::new();
-    for public_id in materialized.keys() {
-        if cancelled() {
-            return Err(());
-        }
-        let Some(internal_id) = public_to_internal(workbook, *public_id) else {
-            continue;
-        };
-        if let Some(trace) = engine.calculated_decimal_trace(internal_id) {
-            traces.insert(*public_id, trace);
-        }
-    }
     previous.apply_incremental_patch_cancellable(
         super::IncrementalCalculationPatch::new(
             dirty,
             removed_formulas,
             cells,
             materialized,
-            traces,
             workbook,
             options,
         ),
@@ -598,30 +585,7 @@ fn snapshot_from_engine_cancellable(
     }
     let materialized_cells =
         build_materialization_view_cancellable(workbook, engine, &cells, cancelled)?;
-    // Keyed off the materialized view, not `cells`: a legacy-array or dynamic-spill member is not
-    // a formula cell, so keying off `cells` would drop its trace here while `seed_previous_results`
-    // still restores its value — and an incremental recalculation would then answer differently
-    // from the full calculation of the same workbook.
-    let mut numeric_decimal_traces = BTreeMap::new();
-    for public_id in materialized_cells.keys() {
-        if cancelled() {
-            return Err(());
-        }
-        let Some(internal_id) = public_to_internal(workbook, *public_id) else {
-            continue;
-        };
-        if let Some(trace) = engine.calculated_decimal_trace(internal_id) {
-            numeric_decimal_traces.insert(*public_id, trace);
-        }
-    }
-    CalculationSnapshot::new_cancellable(
-        cells,
-        materialized_cells,
-        numeric_decimal_traces,
-        workbook,
-        options,
-        cancelled,
-    )
+    CalculationSnapshot::new_cancellable(cells, materialized_cells, workbook, options, cancelled)
 }
 
 fn build_materialization_view_cancellable(

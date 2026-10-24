@@ -32,10 +32,10 @@
       "expected_zero": false
     },
     {
-      "id": "meaningful_sixteenth_digit_difference",
+      "id": "sixteenth_digit_dropped_from_literal",
       "formula": "1.0000000000000004 - 1.0",
       "oracle": "excel_saved_cache",
-      "expected_zero": false
+      "expected_zero": true
     },
     {
       "id": "ordinary_nonzero_sum",

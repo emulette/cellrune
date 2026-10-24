@@ -1,6 +1,5 @@
 use super::super::FinancialSolverSemantics;
 use super::super::ast::Expr;
-use super::super::decimal::{DecimalTrace, RationalTrace};
 use super::super::eval::{Engine, EvalContext};
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
@@ -8,8 +7,8 @@ use super::array_common::poll_cancellation;
 use super::calendar::date_from_serial;
 use super::kernel::FinancialFunction;
 use super::util::{
-    DecimalTraces, ExcelSum, collect_argument_values_with_counter,
-    collect_argument_values_with_policy, required_number, required_number_with_trace,
+    ExcelSum, collect_argument_values_with_counter, collect_argument_values_with_policy,
+    required_number,
 };
 
 pub(super) fn call(
@@ -171,32 +170,23 @@ fn npv(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.len() < 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let (rate, rate_trace) = match required_number_with_trace(engine, context, &args[0]) {
-        Ok((rate, rate_trace)) if rate != -1.0 => (rate, rate_trace),
+    let rate = match required_number(engine, context, &args[0]) {
+        Ok(rate) if rate != -1.0 => rate,
         Ok(_) => return Value::Error(ErrorKind::Div0),
         Err(kind) => return Value::Error(kind),
     };
-    let cashflows = match numeric_cashflows_with_trace(engine, context, &args[1..]) {
+    let cashflows = match numeric_cashflows(engine, context, &args[1..]) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
-    let base_trace = rate_trace
-        .and_then(|rate| DecimalTrace::ONE.add(rate))
-        .and_then(RationalTrace::from_decimal);
-    // The same accumulator the aggregates use, carrying rationals because discounting divides each
-    // cashflow before it is added. `NPV` therefore follows the arithmetic axis through one shared
-    // policy read rather than a private copy of the near-zero rule.
-    let mut total: ExcelSum<RationalTrace> = ExcelSum::new(engine);
-    for (index, (cashflow, cashflow_trace)) in cashflows.into_iter().enumerate() {
+    // Excel does not correct a near-zero total of discounted cashflows: `NPV(0,0.1,0.2,-0.3)` keeps
+    // its residue.
+    let mut total = ExcelSum::plain();
+    for (index, cashflow) in cashflows.into_iter().enumerate() {
         let Ok(period) = i32::try_from(index + 1) else {
             return Value::Error(ErrorKind::Num);
         };
-        let discounted = cashflow / (1.0 + rate).powi(period);
-        let rational_period = u32::try_from(period).ok();
-        let discounted_trace = cashflow_trace
-            .and_then(RationalTrace::from_decimal)
-            .and_then(|cashflow| cashflow.divide(base_trace?.pow(rational_period?)?));
-        total.add_with_trace(discounted, discounted_trace);
+        total.add(cashflow / (1.0 + rate).powi(period));
     }
     financial_value(total.total())
 }
@@ -539,26 +529,12 @@ fn numeric_cashflows(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Vec<f64>, ErrorKind> {
-    numeric_cashflows_with_trace(engine, context, args)
-        .map(|values| values.into_iter().map(|(number, _)| number).collect())
-}
-
-fn numeric_cashflows_with_trace(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
-    args: &[Expr],
-) -> Result<Vec<(f64, Option<DecimalTrace>)>, ErrorKind> {
     let mut values = Vec::new();
-    let items = collect_argument_values_with_policy(
-        engine,
-        context,
-        args,
-        SheetSpanPolicy::Unsupported,
-        DecimalTraces::Collect,
-    )?;
+    let items =
+        collect_argument_values_with_policy(engine, context, args, SheetSpanPolicy::Unsupported)?;
     for item in items {
         match item.value {
-            Value::Number(number) => values.push((number, item.decimal_trace)),
+            Value::Number(number) => values.push(number),
             Value::Error(kind) => return Err(kind),
             Value::Blank | Value::Text(_) | Value::Logical(_) => {}
         }

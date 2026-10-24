@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use super::ast::Expr;
 use super::convert::value_from_cell;
-use super::decimal::DecimalTrace;
 use super::functions::descriptor::Volatility;
 use super::functions::{LookupIndexCache, RegexCache};
 use super::graph::{DependencyGraph, DependencyNode, Schedule};
@@ -1172,7 +1171,6 @@ pub struct Engine<'workbook> {
     dependencies: Arc<DependencyGraph>,
     dependency_areas: Arc<AreaNodes>,
     results: std::collections::HashMap<CellId, Value>,
-    numeric_decimal_traces: BTreeMap<CellId, DecimalTrace>,
     retained_results: BTreeMap<CellId, CalculationCellResult>,
     array_regions: Vec<ArrayRegion>,
     /// An index of the regions `array_regions` starts with.
@@ -1327,39 +1325,6 @@ impl<'workbook> Engine<'workbook> {
         }
     }
 
-    /// Exact decimal behind this cell's number, when the configured policy can act on one.
-    ///
-    /// Under `Ieee754` nothing consults the trace, so it is not computed: the literal path costs a
-    /// `f64::to_string` and an allocation per cell, which would otherwise be charged to every
-    /// range read on a policy that discards the result.
-    pub(super) fn numeric_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
-        if !matches!(
-            self.arithmetic_semantics(),
-            crate::ArithmeticSemantics::ExcelNearZero
-        ) {
-            return None;
-        }
-        self.source_decimal_trace(cell, &self.value_source(cell))
-    }
-
-    fn source_decimal_trace(&self, cell: CellId, source: &ValueSource<'_>) -> Option<DecimalTrace> {
-        match source {
-            ValueSource::Calculated(_) => self.numeric_decimal_traces.get(&cell).copied(),
-            ValueSource::Previous(_) => self.previous_numeric_decimal_trace(cell),
-            ValueSource::Literal(CellValue::Number(number)) => {
-                DecimalTrace::from_number(number.get())
-            }
-            ValueSource::Literal(_) | ValueSource::Blank | ValueSource::Error(_) => None,
-        }
-    }
-
-    pub(super) fn calculated_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
-        self.numeric_decimal_traces
-            .get(&cell)
-            .copied()
-            .or_else(|| self.previous_numeric_decimal_trace(cell))
-    }
-
     fn previous_materialized(&self, cell: CellId) -> Option<&crate::MaterializedCalculationCell> {
         let previous = self.previous?;
         let public = internal_to_public(self.workbook, cell)?;
@@ -1417,13 +1382,6 @@ impl<'workbook> Engine<'workbook> {
             }
         }
         Ok(cells)
-    }
-
-    fn previous_numeric_decimal_trace(&self, cell: CellId) -> Option<DecimalTrace> {
-        let previous = self.previous?;
-        let public = internal_to_public(self.workbook, cell)?;
-        self.previous_materialized(cell)?;
-        previous.numeric_decimal_trace(public)
     }
 
     pub(super) fn has_unavailable_dependency(
@@ -1683,41 +1641,6 @@ impl<'workbook> Engine<'workbook> {
         }
         self.charge_reference_cells(context, 1)?;
         Ok(Self::source_value(self.stored_value_source(cell, stored)))
-    }
-
-    /// Reads a referenced cell with [`Self::numeric_decimal_trace`], finding its source once.
-    pub(super) fn read_reference_cell_with_trace(
-        &self,
-        context: EvalContext<'_>,
-        cell: CellId,
-    ) -> Result<(Value, Option<DecimalTrace>), ErrorKind> {
-        self.read_stored_reference_cell_with_trace(context, cell, self.stored_cell(cell))
-    }
-
-    /// Reads a referenced cell as [`Self::read_reference_cell_with_trace`] does, given its
-    /// `stored` cell.
-    pub(super) fn read_stored_reference_cell_with_trace(
-        &self,
-        context: EvalContext<'_>,
-        cell: CellId,
-        stored: StoredCell<'workbook>,
-    ) -> Result<(Value, Option<DecimalTrace>), ErrorKind> {
-        if context.is_cancelled() {
-            return Err(ErrorKind::ResourceLimit(
-                CalculationLimitKind::FunctionIterations,
-            ));
-        }
-        self.charge_reference_cells(context, 1)?;
-        let source = self.stored_value_source(cell, stored);
-        let trace = if matches!(
-            self.arithmetic_semantics(),
-            crate::ArithmeticSemantics::ExcelNearZero
-        ) {
-            self.source_decimal_trace(cell, &source)
-        } else {
-            None
-        };
-        Ok((Self::source_value(source), trace))
     }
 
     pub(super) fn max_function_iterations(&self) -> u64 {

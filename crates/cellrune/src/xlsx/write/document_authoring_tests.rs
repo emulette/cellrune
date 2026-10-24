@@ -51,7 +51,6 @@ fn plan(draft: &WorkbookDraft) -> MaterializationPlan {
     let calculation = CalculationSnapshot::new(
         BTreeMap::new(),
         BTreeMap::new(),
-        BTreeMap::new(),
         draft.workbook(),
         CalculationOptions::default(),
     );

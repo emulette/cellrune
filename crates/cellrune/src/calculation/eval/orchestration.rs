@@ -57,7 +57,6 @@ impl<'workbook> Engine<'workbook> {
             dependencies: Arc::new(DependencyGraph::default()),
             dependency_areas: Arc::new(AreaNodes::default()),
             results: std::collections::HashMap::new(),
-            numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
             static_array_owners: Arc::new(ArrayOwners::new(&array_regions)),
             array_regions,
@@ -310,7 +309,6 @@ impl<'workbook> Engine<'workbook> {
             dependencies: Arc::clone(&compiled.dependencies),
             dependency_areas: Arc::clone(&compiled.dependency_areas),
             results: std::collections::HashMap::new(),
-            numeric_decimal_traces: BTreeMap::new(),
             retained_results: BTreeMap::new(),
             static_array_owners: Arc::new(ArrayOwners::new(&array_regions)),
             array_regions,
@@ -360,7 +358,6 @@ impl<'workbook> Engine<'workbook> {
         self.lookup_indexes.get_mut().clear();
         if dirty.is_none() {
             self.results.clear();
-            self.numeric_decimal_traces.clear();
             self.retained_results.clear();
             self.dynamic_spills.clear();
             self.array_regions.retain(|region| !region.provisional);
@@ -400,7 +397,6 @@ impl<'workbook> Engine<'workbook> {
         match dirty {
             None => {
                 self.results.clear();
-                self.numeric_decimal_traces.clear();
                 self.retained_results.clear();
                 self.dynamic_spills.clear();
                 self.array_regions.retain(|region| !region.provisional);
@@ -408,7 +404,6 @@ impl<'workbook> Engine<'workbook> {
             Some(dirty) => {
                 for cell in dirty {
                     self.results.remove(cell);
-                    self.numeric_decimal_traces.remove(cell);
                     self.retained_results.remove(cell);
                 }
             }
@@ -454,7 +449,7 @@ impl<'workbook> Engine<'workbook> {
                     ErrorKind::ResourceLimit(CalculationLimitKind::DependencyEdges),
                 ),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_final_array_with_trace(
+                Some(expr) => self.eval_final_array(
                     context.with_argument_owner(expr.argument_owner()),
                     expr.root(),
                 ),
@@ -477,7 +472,7 @@ impl<'workbook> Engine<'workbook> {
                     ErrorKind::ResourceLimit(CalculationLimitKind::DependencyEdges),
                 ),
                 Some(_) if self.name_cycle_cells.contains(&cell) => Err(ErrorKind::Unsupported),
-                Some(expr) => self.eval_final_array_with_trace(
+                Some(expr) => self.eval_final_array(
                     context.with_argument_owner(expr.argument_owner()),
                     expr.root(),
                 ),
@@ -502,17 +497,13 @@ impl<'workbook> Engine<'workbook> {
                 Value::Error(ErrorKind::Unsupported)
             }
             Some(expr) => {
-                let evaluated = self.eval_final_scalar_with_trace(
+                let evaluated = self.eval_final_scalar(
                     context.with_argument_owner(expr.argument_owner()),
                     expr.root(),
                 );
                 if self.target_dependencies_pending() {
                     self.record_evaluation_work(&budget);
                     return Ok(());
-                }
-                if let (Value::Number(_), Some(trace)) = (&evaluated.value, evaluated.decimal_trace)
-                {
-                    self.numeric_decimal_traces.insert(cell, trace);
                 }
                 match evaluated.value {
                     // Excel materializes a blank final formula result as numeric zero while

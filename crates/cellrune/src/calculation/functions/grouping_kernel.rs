@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::super::decimal::DecimalTrace;
 use super::super::eval::{Engine, EvalContext};
 use super::super::scope::ArrayEvaluation;
 use super::super::value::{ErrorKind, Value};
@@ -46,7 +45,6 @@ pub(super) enum AxisGroupKind {
 #[derive(Debug, Clone)]
 pub(super) struct AxisGroup {
     pub(super) labels: Vec<Value>,
-    pub(super) label_traces: Vec<Option<DecimalTrace>>,
     pub(super) members: Vec<u32>,
     pub(super) kind: AxisGroupKind,
     pub(super) sort_values: Vec<Value>,
@@ -97,14 +95,12 @@ pub(super) fn build_detail_groups(
     for row in rows {
         poll_cancellation(context)?;
         let mut labels = Vec::with_capacity(fields.array.cols as usize);
-        let mut label_traces = Vec::with_capacity(fields.array.cols as usize);
         let mut key = Vec::with_capacity(fields.array.cols as usize);
         for column in 0..fields.array.cols {
             poll_cancellation(context)?;
             let value = fields.array.at(*row, column).clone();
             key.push(KeyValue::from_value(&value));
             labels.push(value);
-            label_traces.push(fields.decimal_at(*row, column));
         }
         if let Some(index) = indexes.get(&key).copied() {
             groups[index].members.push(*row);
@@ -112,7 +108,6 @@ pub(super) fn build_detail_groups(
             indexes.insert(key, groups.len());
             groups.push(AxisGroup {
                 labels,
-                label_traces,
                 members: vec![*row],
                 kind: AxisGroupKind::Detail,
                 sort_values: Vec::new(),
@@ -552,18 +547,15 @@ fn grand_total(
     total_label: &Value,
 ) -> Result<AxisGroup, ErrorKind> {
     let mut labels = Vec::with_capacity(field_count);
-    let mut label_traces = Vec::with_capacity(field_count);
     for _ in 0..field_count {
         poll_cancellation(context)?;
         labels.push(Value::Blank);
-        label_traces.push(None);
     }
     if let Some(label) = labels.first_mut() {
         *label = total_label.clone();
     }
     Ok(AxisGroup {
         labels,
-        label_traces,
         members: merge_members(engine, context, details.iter())?,
         kind: AxisGroupKind::GrandTotal,
         sort_values: Vec::new(),
@@ -580,18 +572,14 @@ fn subtotal(
 ) -> Result<AxisGroup, ErrorKind> {
     let key = &detail.labels[..prefix_len];
     let mut labels = Vec::with_capacity(field_count);
-    let mut label_traces = Vec::with_capacity(field_count);
     for _ in 0..field_count {
         poll_cancellation(context)?;
         labels.push(Value::Blank);
-        label_traces.push(None);
     }
     labels[..prefix_len].clone_from_slice(key);
-    label_traces[..prefix_len].copy_from_slice(&detail.label_traces[..prefix_len]);
     let map_key = (prefix_len, key_values(context, key)?);
     Ok(AxisGroup {
         labels,
-        label_traces,
         members: subtotals.remove(&map_key).ok_or(ErrorKind::Value)?,
         kind: AxisGroupKind::Subtotal { prefix_len },
         sort_values: Vec::new(),

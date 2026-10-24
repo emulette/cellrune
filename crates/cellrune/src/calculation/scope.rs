@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use super::decimal::DecimalTrace;
 use super::functions::BuiltinCallable;
-use super::operators::broadcast_index;
 use super::runtime::{Array, ReferenceValue};
 use super::value::{ErrorKind, Value};
 use crate::{DefinedName, DefinedNameScope, SheetId, WorkbookSnapshot};
@@ -27,15 +25,11 @@ pub(super) fn resolve_defined_name_scoped<'a>(
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ScalarEvaluation {
     pub(super) value: Value,
-    pub(super) decimal_trace: Option<DecimalTrace>,
 }
 
 impl ScalarEvaluation {
-    pub(super) const fn untracked(value: Value) -> Self {
-        Self {
-            value,
-            decimal_trace: None,
-        }
+    pub(super) const fn new(value: Value) -> Self {
+        Self { value }
     }
 
     pub(super) fn engine_issue(&self) -> Option<ErrorKind> {
@@ -49,29 +43,15 @@ impl ScalarEvaluation {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ArrayEvaluation {
     pub(super) array: Array,
-    pub(super) decimal_traces: Vec<Option<DecimalTrace>>,
 }
 
 impl ArrayEvaluation {
-    /// Exact decimal of the element read at this broadcast position.
-    pub(super) fn decimal_at(&self, row: u32, column: u32) -> Option<DecimalTrace> {
-        let index = broadcast_index(self.array.rows, self.array.cols, row, column)?;
-        self.decimal_traces.get(index).copied().flatten()
-    }
-
-    pub(super) fn untracked(array: Array) -> Self {
-        let decimal_traces = vec![None; array.data.len()];
-        Self {
-            array,
-            decimal_traces,
-        }
+    pub(super) const fn new(array: Array) -> Self {
+        Self { array }
     }
 
     pub(super) fn scalar(evaluated: ScalarEvaluation) -> Self {
-        Self {
-            array: Array::scalar(evaluated.value),
-            decimal_traces: vec![evaluated.decimal_trace],
-        }
+        Self::new(Array::scalar(evaluated.value))
     }
 
     pub(super) fn engine_issue(&self) -> Option<ErrorKind> {

@@ -120,42 +120,32 @@ correction is the default.
 | Formula | Default (`ExcelNearZero`) | Opt-in (`Ieee754`) |
 | --- | --- | --- |
 | `=0.1+0.2-0.3` | `0` | `5.551115123125783e-17` |
-| `=(0.5-0.4)-0.1` | `0` | `-2.7755575615628914e-17` |
 | `=SUM(0.1,0.2,-0.3)` | `0` | `5.551115123125783e-17` |
-| `=SUMPRODUCT({0.1,0.2,-0.3})` | `0` | `5.551115123125783e-17` |
+| `=(0.1+0.2-0.3)` | `5.551115123125783e-17` | `5.551115123125783e-17` |
+| `=(0.1+0.2-0.3)*1E+17` | `5.551115123125783` | `5.551115123125783` |
+| `=SUM(0.1,0.2,-0.3,0)` | `5.551115123125783e-17` | `5.551115123125783e-17` |
+| `=SUMPRODUCT({0.1,0.2,-0.3})` | `5.551115123125783e-17` | `5.551115123125783e-17` |
 | `=100.1-100-0.1` | `-5.689893001203927e-15` | `-5.689893001203927e-15` |
 
-The correction is applied at each addition and subtraction, in the operator path and in the
-policy-aware running totals used by `SUM`, `AVERAGE`, `SUMIF(S)`, `AVERAGEIF(S)`, `SUBTOTAL`,
-`SUMPRODUCT`, and `NPV`. Alongside the `f64` result, scalar addition/subtraction trees and
-aggregate accumulators carry an exact trace of the parsed decimal inputs. `SUMPRODUCT` multiplies
-before it adds, and the product of two exact decimals is itself an exact decimal, so its terms stay
-traceable. `NPV` divides before it adds, and carries the same proof as an exact rational trace
-through discounting.
+Every value in the default column is what Excel 16.0 build 20326 returns. Excel corrects only:
 
-LET and MAP scope transport does not choose between `ExcelNearZero` and `Ieee754`. A scope entry
-preserves the value together with its optional decimal trace across scalar, array, calculated-cell,
-and cell/range-reference bindings; the arithmetic operator still consults the workbook's selected
-mode when it consumes that value. Consequently `LET(x,0.1+0.2,x-0.3)` is identical to its direct
-equivalent in each mode: zero under `ExcelNearZero`, and the raw IEEE-754 residue under `Ieee754`.
-The scope representation prevents trace loss; it does not impose Excel arithmetic semantics.
+- the addition or subtraction a formula ends with, unparenthesized, element by element when it
+  spills (`={0.1,1}+0.2-0.3` spills `0` and `0.9`). A defined name's formula is a formula of its
+  own, so a name defined as `=0.1+0.2-0.3` is `0` wherever it is used. A parenthesized root, a
+  further operation, an `IF` branch, and a `LET` or `LAMBDA` body keep the residue, so
+  `=0.1+0.2-0.3=0` is `FALSE`;
+- the final addition of the totals of `SUM`, `AVERAGE`, `AVERAGEA`, `SUBTOTAL`, and `AGGREGATE`,
+  so `=SUM(0.1,0.2,-0.3)*1E+17` is `0` while `=SUM(0.1,0.2,-0.3,0)`, whose final addition adds
+  zero, keeps the residue. `SUMIF(S)`, `AVERAGEIF(S)`, the database functions, `SUMPRODUCT`, and
+  `NPV` do not correct their totals.
 
-A result is replaced with zero only when both of these conditions hold:
-
-1. the exact decimal or rational trace is zero; and
-2. the binary residue is at most `1e-15 * max(abs(left), abs(right))` for the cancelling
-   operation.
-
-The exact trace prevents a nearby real difference from being swallowed. The relative binary
-boundary distinguishes Excel's saved zero for `=0.1+0.2-0.3` from its saved residue for
-`=100.1-100-0.1`. The `1e-15` coefficient is an empirical compatibility contract pinned by the
-committed Excel workbook; Microsoft describes its near-zero correction and 15-digit precision but
-does not publish this boundary as an algorithm. See Microsoft's
-[floating-point accuracy note](https://learn.microsoft.com/en-us/troubleshoot/microsoft-365-apps/excel/floating-point-arithmetic-inaccurate-result).
-
-The choice matters beyond the number itself:
-`=(0.1+0.2-0.3)=0` is `TRUE` under the default and `FALSE` under `Ieee754`, and the same choice
-reaches every `IF` branch that compares a computed value against zero.
+A corrected result is zero when it is smaller than eight units in the last place of the larger
+operand: below `2^(e-49)` for a larger operand in `[2^e, 2^(e+1))`. So `=1+7*2^-52-1` is `0`
+and `=1+8*2^-52-1` is `1.7763568394002505e-15`, `=100.1-100-0.1` keeps its residue, and
+`=1E+15+0.3-1E+15` is `0` although its exact decimal value is `0.3`: the rule looks at the binary
+result only. Microsoft describes the correction in its
+[floating-point accuracy note](https://learn.microsoft.com/en-us/troubleshoot/microsoft-365-apps/excel/floating-point-arithmetic-inaccurate-result)
+without publishing the boundary; the boundary above is measured.
 
 Releases 0.1.0 through 0.1.2 behaved as `Ieee754` does. It remains available:
 
@@ -166,23 +156,51 @@ let options = CalculationOptions::default()
     .with_arithmetic_semantics(ArithmeticSemantics::Ieee754);
 ```
 
-The ordinary regression suite checks exact-trace propagation and the relative boundary in
-table-driven cases. The separate local oracle audit checks both
-`=0.1+0.2-0.3`, which Excel saved as zero, and `=100.1-100-0.1`, which Excel saved with its residue,
-using bit-exact comparisons. It also keeps
-`=100.1-100-0.099999999999999`, whose exact value is nonzero, nonzero. Operator, array, ordinary
-aggregate, conditional aggregate, and `SUMPRODUCT` paths are compared under both modes, including
-a `SUMPRODUCT` whose terms cancel only after multiplication.
+The regression suite checks each formula above, the boundary cases, and the paths that do not
+correct, bit for bit against the Excel values.
 
-Under `Ieee754` no path consults the exact trace, so none is computed.
+#### Also selected by this option: fifteen-digit comparison and rounding
 
-#### Not part of this: fifteen-digit display
+`=1.1-1` keeps its residue, `0.10000000000000009`, under either policy; Excel shows it as `0.1`
+because it renders fifteen significant digits, and so do comparisons and rounding. Under the
+default:
 
-`=1.1-1` shows `0.1` in Excel and `0.10000000000000009` here, and that is a *display* difference,
-not this correction: Excel renders to fifteen significant digits. Comparing the value is a separate
-difference. Excel returns `TRUE` for `=(1.1-1)=0.1` (the committed oracle case
-`curated:arithmetic:c015`), while CellRune compares the two numbers exactly and returns `FALSE`.
-The near-zero correction above changes neither result.
+- The comparison operators, `SWITCH`, and the criteria of `COUNTIF`, `SUMIF(S)`, `AVERAGEIF(S)`,
+  `MAXIFS`, `MINIFS`, and the database functions treat two numbers as equal when they differ only
+  past their fifteenth significant digit, so `=(1.1-1)=0.1` and `=0.1+0.2=0.3` are `TRUE` as in
+  Excel (the committed oracle cases `curated:arithmetic:c004` and `c015`). The rule is
+  LibreOffice's `rtl::math::approxEqual` without its exception for whole numbers, which Excel does
+  not make (`=POWER(10,15)+1=POWER(10,15)` is `TRUE`): numbers of different signs and a zero
+  compare exactly; otherwise the difference must be below the larger of `2^-48` of the smaller
+  magnitude and half a unit in its fifteenth digit. `<=` is
+  "less or equal", `<>` is "not equal", so `=0.1+0.2>0.3` is `FALSE`. Comparing with zero stays
+  exact; only the correction of a formula's root or an aggregate's total makes a residue zero.
+- Sorting, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `LOOKUP`, `UNIQUE`, `GROUPBY`, and `MODE`
+  keep exact order and equality, because equality to fifteen digits is not transitive.
+- `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and
+  `.PRECISE` forms, `ISO.CEILING`, and `PERCENTRANK` read the scaled quotient to fifteen
+  significant digits before rounding it, so `ROUND(1.005,2)` is `1.01` and `ROUNDDOWN(1.15,2)`
+  is `1.15`. The product is not snapped again: `FLOOR(0.3,0.1)` is three units of `0.1`,
+  `0.30000000000000004`, which Excel also returns. A place past the fifteenth significant digit
+  leaves the value unchanged (`ROUND(1,400)` is `1`).
+
+Under `Ieee754` comparison is exact and rounding uses the binary quotient, so `ROUND(1.005,2)` is
+`1`.
+
+### Matching: numbers in formulas and numbers joined to text
+
+Both rules hold under either `ArithmeticSemantics`, because they decide what a number is written
+as rather than how it is calculated.
+
+- A number written in a formula keeps fifteen significant digits, and the digits after them become
+  zeros, as Excel reads it: `1234567890123456` is `1234567890123450` and `0.30000000000000004`
+  is `0.3`.
+- A number joined to text (`&`, `CONCAT`, `LEN`, and the other text arguments) is rounded to
+  fifteen significant digits. It is written as a plain decimal when that takes at most twenty
+  characters besides the sign and in scientific notation otherwise, with a signed exponent of at
+  least two digits: `2/3&""` is `0.666666666666667`, `1E+19&""` is `10000000000000000000`,
+  `1E+20&""` is `1E+20`, `1.5E-17&""` is `0.000000000000000015`, and `PI()*1E-5&""` is
+  `3.14159265358979E-05`, as in Excel 16.0 build 20326.
 
 #### Not part of this: signed zero
 

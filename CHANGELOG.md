@@ -10,6 +10,41 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Changed
+
+- Under the default `ArithmeticSemantics::ExcelNearZero`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`,
+  `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms, `ISO.CEILING`, and
+  `PERCENTRANK` read the scaled quotient to fifteen significant digits before rounding, as Excel
+  does: `ROUND(1.005,2)` is `1.01`, `ROUNDDOWN(1.15,2)` is `1.15`, and `ROUNDUP(0.1+0.2,1)` is
+  `0.3` where they were `1`, `1.14`, and `0.4`. A place past the fifteenth significant digit leaves
+  the value unchanged, so `ROUND(1,400)` is `1` and `ROUND(1E307,2)` is `1E307` instead of
+  `#NUM!`, and a negative digit count past the range of a double rounds to `0`, or `#NUM!` for
+  `ROUNDUP`, in either mode. Select `ArithmeticSemantics::Ieee754` to round the binary quotient
+  as before.
+- Under the default `ArithmeticSemantics::ExcelNearZero`, the comparison operators, `SWITCH`, and
+  the criteria of `COUNTIF(S)`, `SUMIF(S)`, `AVERAGEIF(S)`, `MAXIFS`, `MINIFS`, and the database
+  functions treat numbers that differ only past their fifteenth significant digit as equal, as
+  Excel does: `=0.1+0.2=0.3` and `=1.1-1=0.1` are `TRUE`, and `COUNTIF` counts a cell holding
+  `0.1+0.2` as `0.3`. Lookups, sorting, `UNIQUE`, `GROUPBY`, and `MODE` keep exact equality.
+  Select `ArithmeticSemantics::Ieee754` to compare exactly as before.
+- Under the default `ArithmeticSemantics::ExcelNearZero`, the near-zero correction follows what
+  Excel does instead of an exact decimal trace. It applies to the addition or subtraction a formula
+  or defined name ends with, unparenthesized, and to the final addition of the `SUM`, `AVERAGE`,
+  `AVERAGEA`, `SUBTOTAL`, and `AGGREGATE` totals, and it zeroes a result below eight units in the
+  last place of the larger operand. So `=(0.1+0.2-0.3)`, `=(0.1+0.2-0.3)*1`, `=0.1+0.2-0.3=0`
+  (now `FALSE`), `LET` bodies, `SUMIF(S)`, `AVERAGEIF(S)`, the database functions, `SUMPRODUCT`,
+  and `NPV` keep the residue they used to correct; `=A1+A2-A3` over formula cells, `=1+7*2^-52-1`,
+  and `=1E+15+0.3-1E+15` are now `0`; and `=SUM(0.1,0.2,-0.3,0)` keeps its residue. Select
+  `ArithmeticSemantics::Ieee754` to keep every residue.
+- A number joined to text (`&`, `CONCAT`, `TEXTJOIN`, `LEN`, and other text arguments) is rounded
+  to fifteen significant digits and written in scientific notation when its plain decimal would
+  take more than twenty characters besides the sign, as Excel does: `2/3&""` is
+  `0.666666666666667` instead of `0.666666666666666`, and `1E+20&""` is `1E+20` instead of
+  twenty-one digits. `TEXT(1E+20,"General")` is now `1E+20` instead of unsupported.
+- A number written in a formula keeps fifteen significant digits, as Excel reads it:
+  `1234567890123456` is `1234567890123450` and `=0.30000000000000004=0.3` is `TRUE`. Formulas
+  that spell more digits calculate with the shortened number.
+
 ### Fixed
 
 - `ISOWEEKNUM` and `WEEKNUM(…, 21)` number every date of a year that starts on a Friday, such as

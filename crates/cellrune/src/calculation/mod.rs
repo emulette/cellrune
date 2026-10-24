@@ -7,18 +7,17 @@ use crate::{
     CellAddress, CellValue, FiniteNumber, Provenance, ProviderIdentity, SheetId,
     WorkbookFingerprint, WorkbookSnapshot,
 };
-use decimal::DecimalTrace;
 
 mod analysis_cache;
 mod ast;
 mod coerce;
 mod convert;
 mod criteria;
-mod decimal;
 mod defined_name_analysis;
 mod display_format;
 mod error;
 mod eval;
+mod excel_digits;
 mod formula_rebase;
 pub(crate) mod formula_references;
 pub(crate) mod formula_rewrite;
@@ -472,19 +471,27 @@ impl FunctionUsageReport {
     }
 }
 
-/// How arithmetic treats Excel's narrow near-zero cancellation case.
+/// Whether calculation follows Excel's fifteen-significant-digit number rules or the IEEE-754
+/// values as they are.
 ///
-/// Excel corrects some addition and subtraction residues to exactly zero, but preserves others
-/// even when the decimal expression cancels exactly. IEEE-754 keeps every such residue. The
-/// difference is visible beyond the number itself, because a residue of
-/// `5.551115123125783e-17` makes `=(0.1+0.2-0.3)=0` false.
+/// Excel corrects some addition and subtraction residues to exactly zero, compares numbers that
+/// differ only past their fifteenth significant digit as equal (`=0.1+0.2=0.3` is `TRUE`), and
+/// reads a scaled quotient to fifteen digits before it rounds (`ROUND(1.005,2)` is `1.01`).
+/// IEEE-754 keeps every residue, compares exactly, and rounds the binary value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum ArithmeticSemantics {
-    /// Apply Excel's observed relative correction when an exact trace proves cancellation.
+    /// Apply Excel's near-zero correction to the addition or subtraction a formula ends with and
+    /// to the totals of `SUM`, `AVERAGE`, `SUBTOTAL`, and `AGGREGATE`, its fifteen-digit
+    /// comparison in the comparison operators, `SWITCH`, and `COUNTIF`-style and
+    /// database criteria, and its fifteen-digit rounding in `ROUND`, `ROUNDUP`, `ROUNDDOWN`,
+    /// `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms, `ISO.CEILING`,
+    /// and `PERCENTRANK`.
     #[default]
     ExcelNearZero,
-    /// Return the IEEE-754 result unchanged, as releases up to 0.1.2 did.
+    /// Use the IEEE-754 values unchanged: no correction, exact comparison, and rounding of the
+    /// binary value, as releases up to 0.1.2 did and as releases up to 0.1.27 did for comparison
+    /// and rounding.
     Ieee754,
 }
 
@@ -875,7 +882,6 @@ pub struct CalculationSnapshot {
     cells: Arc<CalculationStore<CalculationCellResult>>,
     materialized_cells: Arc<CalculationStore<MaterializedCalculationCell>>,
     materialized_cells_by_owner: Arc<CalculationStore<Vec<CalculationCellId>>>,
-    numeric_decimal_traces: Arc<CalculationStore<DecimalTrace>>,
     options: CalculationOptions,
     provenance: Provenance,
     source_revision: u64,
@@ -888,7 +894,6 @@ pub(crate) struct IncrementalCalculationPatch<'a> {
     removed_formulas: BTreeSet<CalculationCellId>,
     cell_results: BTreeMap<CalculationCellId, CalculationCellResult>,
     materialized_results: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
-    decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
     source: &'a WorkbookSnapshot,
     options: CalculationOptions,
 }
@@ -899,7 +904,6 @@ impl<'a> IncrementalCalculationPatch<'a> {
         removed_formulas: BTreeSet<CalculationCellId>,
         cell_results: BTreeMap<CalculationCellId, CalculationCellResult>,
         materialized_results: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
-        decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
         source: &'a WorkbookSnapshot,
         options: CalculationOptions,
     ) -> Self {
@@ -908,7 +912,6 @@ impl<'a> IncrementalCalculationPatch<'a> {
             removed_formulas,
             cell_results,
             materialized_results,
-            decimal_traces,
             source,
             options,
         }
@@ -920,25 +923,16 @@ impl CalculationSnapshot {
     pub(crate) fn new(
         cells: BTreeMap<CalculationCellId, CalculationCellResult>,
         materialized_cells: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
-        numeric_decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
         source: &WorkbookSnapshot,
         options: CalculationOptions,
     ) -> Self {
-        Self::new_cancellable(
-            cells,
-            materialized_cells,
-            numeric_decimal_traces,
-            source,
-            options,
-            &|| false,
-        )
-        .expect("non-cancellable snapshot construction cannot be cancelled")
+        Self::new_cancellable(cells, materialized_cells, source, options, &|| false)
+            .expect("non-cancellable snapshot construction cannot be cancelled")
     }
 
     pub(crate) fn new_cancellable(
         cells: BTreeMap<CalculationCellId, CalculationCellResult>,
         materialized_cells: BTreeMap<CalculationCellId, MaterializedCalculationCell>,
-        numeric_decimal_traces: BTreeMap<CalculationCellId, DecimalTrace>,
         source: &WorkbookSnapshot,
         options: CalculationOptions,
         cancelled: &impl Fn() -> bool,
@@ -957,10 +951,6 @@ impl CalculationSnapshot {
             )?),
             materialized_cells_by_owner: Arc::new(CalculationStore::from_map_cancellable(
                 materialized_cells_by_owner,
-                cancelled,
-            )?),
-            numeric_decimal_traces: Arc::new(CalculationStore::from_map_cancellable(
-                numeric_decimal_traces,
                 cancelled,
             )?),
             options,
@@ -985,7 +975,6 @@ impl CalculationSnapshot {
             cells: Arc::clone(&self.cells),
             materialized_cells: Arc::clone(&self.materialized_cells),
             materialized_cells_by_owner: Arc::clone(&self.materialized_cells_by_owner),
-            numeric_decimal_traces: Arc::clone(&self.numeric_decimal_traces),
             options,
             provenance: Provenance::new(
                 ProviderIdentity::calculator(),
@@ -1008,7 +997,6 @@ impl CalculationSnapshot {
             removed_formulas,
             cell_results,
             materialized_results,
-            decimal_traces,
             source,
             options,
         } = patch;
@@ -1018,7 +1006,6 @@ impl CalculationSnapshot {
         let mut cells = Arc::clone(&self.cells);
         let mut materialized_cells = Arc::clone(&self.materialized_cells);
         let mut materialized_cells_by_owner = Arc::clone(&self.materialized_cells_by_owner);
-        let mut numeric_decimal_traces = Arc::clone(&self.numeric_decimal_traces);
 
         calculation_store_mut_cancellable(&mut cells, cancelled)?.apply_patch_cancellable(
             &removed_formulas,
@@ -1053,14 +1040,11 @@ impl CalculationSnapshot {
             .apply_patch_cancellable(dirty, added_by_owner, cancelled)?;
         calculation_store_mut_cancellable(&mut materialized_cells, cancelled)?
             .apply_patch_cancellable(&removed, materialized_results, cancelled)?;
-        calculation_store_mut_cancellable(&mut numeric_decimal_traces, cancelled)?
-            .apply_patch_cancellable(&removed, decimal_traces, cancelled)?;
 
         Ok(Self {
             cells,
             materialized_cells,
             materialized_cells_by_owner,
-            numeric_decimal_traces,
             options,
             provenance: Provenance::new(
                 ProviderIdentity::calculator(),
@@ -1107,13 +1091,6 @@ impl CalculationSnapshot {
         &self,
     ) -> impl ExactSizeIterator<Item = (CalculationCellId, &MaterializedCalculationCell)> {
         self.materialized_cells.iter()
-    }
-
-    pub(in crate::calculation) fn numeric_decimal_trace(
-        &self,
-        cell: CalculationCellId,
-    ) -> Option<DecimalTrace> {
-        self.numeric_decimal_traces.get(&cell).copied()
     }
 
     /// Returns the number of formula results.

@@ -6035,8 +6035,11 @@ fn invalid_intrinsic_arguments_are_unreachable_to_dependency_analysis() {
     }
 }
 
+/// Excel corrects a near-zero cancellation only in the addition or subtraction a formula ends with,
+/// so a LET or LAMBDA body keeps the residue (Excel 16.0 build 20326; LAMBDA is measured through
+/// LET because that build has no LAMBDA).
 #[test]
-fn let_and_map_preserve_decimal_traces_without_overriding_arithmetic_mode() {
+fn let_and_lambda_bodies_are_not_formula_roots() {
     let workbook = workbook_with_formulas(&[
         (1, 1, "0.1+0.2-0.3"),
         (1, 2, "LET(x,0.1+0.2,x-0.3)"),
@@ -6054,32 +6057,60 @@ fn let_and_map_preserve_decimal_traces_without_overriding_arithmetic_mode() {
         (2, 3, "LET(x,A2,x-0.3)"),
         (2, 4, "LET(source,A2:A2,source-0.3)"),
     ]);
+    let residue = 0.1_f64 + 0.2_f64 - 0.3_f64;
 
     let excel = calculate_workbook(&workbook, CalculationOptions::default());
-    assert_number(&excel, 1, 0.0, 0.0);
-    assert_equal_number_bits(&excel, 1, 2);
-    assert_equal_number_bits(&excel, 1, 3);
-    assert_equal_number_bits(&excel, 4, 5);
-    assert_equal_number_bits(&excel, 1, 6);
-    assert_equal_number_bits(&excel, 1, 7);
-    assert_number_at(&excel, 2, 2, 0.0, 0.0);
-    assert_equal_number_bits_at(&excel, 2, 2, 2, 3);
-    assert_equal_number_bits_at(&excel, 2, 2, 2, 4);
+    for (row, column, expected) in [
+        (1, 1, 0.0),
+        (1, 2, residue),
+        (1, 3, residue),
+        (1, 4, 0.0),
+        (1, 5, 0.0),
+        (1, 6, residue),
+        (1, 7, residue),
+        (2, 2, 0.0),
+        (2, 3, residue),
+        (2, 4, residue),
+    ] {
+        assert_number_at(&excel, row, column, expected, 0.0);
+    }
 
     let ieee = calculate_workbook(
         &workbook,
         CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754),
     );
+    for (row, column) in [
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (1, 6),
+        (1, 7),
+        (2, 2),
+        (2, 3),
+        (2, 4),
+    ] {
+        assert_number_at(&ieee, row, column, residue, 0.0);
+    }
+}
+
+/// A defined name's formula is a root of its own: Excel 16.0 build 20326 returns `0` for `=NZ` and
+/// `=NZ*1E+17` when `NZ` is `=0.1+0.2-0.3`, and the residue when the name's formula is parenthesized.
+#[test]
+fn defined_name_formulas_correct_their_own_root_sum() {
+    let workbook = workbook_with_formulas_and_names(
+        &[
+            (1, 1, "NZ"),
+            (1, 2, "NZ*1E+17"),
+            (1, 3, "NZP"),
+            (1, 4, "SUM(NZ)"),
+        ],
+        &[("NZ", "0.1+0.2-0.3"), ("NZP", "(0.1+0.2-0.3)")],
+    );
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     let residue = 0.1_f64 + 0.2_f64 - 0.3_f64;
-    assert_number(&ieee, 1, residue, f64::EPSILON);
-    assert_equal_number_bits(&ieee, 1, 2);
-    assert_equal_number_bits(&ieee, 1, 3);
-    assert_equal_number_bits(&ieee, 4, 5);
-    assert_equal_number_bits(&ieee, 1, 6);
-    assert_equal_number_bits(&ieee, 1, 7);
-    assert_number_at(&ieee, 2, 2, residue, f64::EPSILON);
-    assert_equal_number_bits_at(&ieee, 2, 2, 2, 3);
-    assert_equal_number_bits_at(&ieee, 2, 2, 2, 4);
+    for (column, expected) in [(1, 0.0), (2, 0.0), (3, residue), (4, 0.0)] {
+        assert_number_at(&calculation, 1, column, expected, 0.0);
+    }
 }
 
 #[test]
@@ -6434,54 +6465,6 @@ fn assert_positive_zero(calculation: &cellrune::CalculationSnapshot, column: u32
     assert!(
         !number.get().is_sign_negative(),
         "column {column} produced negative zero, which Excel reports as 0",
-    );
-}
-
-fn assert_equal_number_bits(
-    calculation: &cellrune::CalculationSnapshot,
-    left_column: u32,
-    right_column: u32,
-) {
-    let value = |column: u32| {
-        let Some(CalculationCellResult::Value(CellValue::Number(actual))) =
-            calculation.cell(cell_id(column))
-        else {
-            panic!(
-                "expected numeric calculation result in column {column}, got {:?}",
-                calculation.cell(cell_id(column))
-            );
-        };
-        actual.get()
-    };
-    assert_eq!(
-        value(left_column).to_bits(),
-        value(right_column).to_bits(),
-        "columns {left_column} and {right_column} changed arithmetic semantics",
-    );
-}
-
-fn assert_equal_number_bits_at(
-    calculation: &cellrune::CalculationSnapshot,
-    left_row: u32,
-    left_column: u32,
-    right_row: u32,
-    right_column: u32,
-) {
-    let value = |row: u32, column: u32| {
-        let id = calculation_cell_id(row, column);
-        let Some(CalculationCellResult::Value(CellValue::Number(actual))) = calculation.cell(id)
-        else {
-            panic!(
-                "expected numeric calculation result at row {row}, column {column}, got {:?}",
-                calculation.cell(id)
-            );
-        };
-        actual.get()
-    };
-    assert_eq!(
-        value(left_row, left_column).to_bits(),
-        value(right_row, right_column).to_bits(),
-        "cells ({left_row},{left_column}) and ({right_row},{right_column}) changed arithmetic semantics",
     );
 }
 

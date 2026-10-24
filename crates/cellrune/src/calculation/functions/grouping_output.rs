@@ -56,11 +56,10 @@ pub(super) fn build_groupby_output(
         u64::try_from(capacity).map_err(|_| ErrorKind::Num)?,
     )?;
     let mut data = Vec::with_capacity(capacity);
-    let mut traces = Vec::with_capacity(capacity);
     if show_headers {
         for column in 0..output.fields.array.cols {
             poll_cancellation(context)?;
-            let (value, trace) = output_header(
+            let value = output_header(
                 engine,
                 output.headers,
                 output.input_has_header,
@@ -69,11 +68,10 @@ pub(super) fn build_groupby_output(
                 "Row Field",
             )?;
             data.push(value);
-            traces.push(trace);
         }
         for column in 0..output.values.array.cols {
             poll_cancellation(context)?;
-            let (value, trace) = output_header(
+            let value = output_header(
                 engine,
                 output.headers,
                 output.input_has_header,
@@ -82,16 +80,13 @@ pub(super) fn build_groupby_output(
                 "Value",
             )?;
             data.push(value);
-            traces.push(trace);
         }
     }
     for group in output.groups {
         poll_cancellation(context)?;
-        for (column, (label, trace)) in group.labels.iter().zip(&group.label_traces).enumerate() {
+        for (column, label) in group.labels.iter().enumerate() {
             poll_cancellation(context)?;
-            let (label, trace) = output_group_label(group, column, label, *trace);
-            data.push(label);
-            traces.push(trace);
+            data.push(output_group_label(group, column, label));
         }
         for column in 0..output.values.array.cols {
             poll_cancellation(context)?;
@@ -105,13 +100,13 @@ pub(super) fn build_groupby_output(
                 output.active_members,
             )?;
             data.push(evaluated.value);
-            traces.push(evaluated.decimal_trace);
         }
     }
-    Ok(ArrayEvaluation {
-        array: super::super::runtime::Array { rows, cols, data },
-        decimal_traces: traces,
-    })
+    Ok(ArrayEvaluation::new(super::super::runtime::Array {
+        rows,
+        cols,
+        data,
+    }))
 }
 
 pub(super) fn build_pivot_output(
@@ -145,7 +140,7 @@ pub(super) fn build_pivot_output(
         context,
         u64::try_from(capacity).map_err(|_| ErrorKind::Num)?,
     )?;
-    let mut output = ArrayEvaluation::untracked(super::super::runtime::Array {
+    let mut output = ArrayEvaluation::new(super::super::runtime::Array {
         rows,
         cols,
         data: vec![Value::Text(String::new()); capacity],
@@ -210,13 +205,12 @@ pub(super) fn build_pivot_output(
             .ok_or(ErrorKind::Num)?;
         for column in 0..pivot.row_fields.array.cols {
             poll_cancellation(context)?;
-            let (label, trace) = output_group_label(
+            let label = output_group_label(
                 row_group,
                 column as usize,
                 &row_group.labels[column as usize],
-                row_group.label_traces[column as usize],
             );
-            set_cell(&mut output, output_row, column, label, trace)?;
+            set_cell(&mut output, output_row, column, label)?;
         }
         for (column_index, column_group) in pivot.column_groups.iter().enumerate() {
             let intersection_visits = row_group
@@ -255,7 +249,6 @@ pub(super) fn build_pivot_output(
                         output_row,
                         output_column,
                         Value::Text(String::new()),
-                        None,
                     )?;
                 } else {
                     let evaluated = invoke_aggregate(
@@ -267,13 +260,7 @@ pub(super) fn build_pivot_output(
                         &subset,
                         relative_members,
                     )?;
-                    set_cell(
-                        &mut output,
-                        output_row,
-                        output_column,
-                        evaluated.value,
-                        evaluated.decimal_trace,
-                    )?;
+                    set_cell(&mut output, output_row, output_column, evaluated.value)?;
                 }
             }
         }
@@ -298,11 +285,11 @@ fn write_pivot_headers(
             pivot.input_has_header,
             pivot.column_fields,
         )?;
-        set_cell(output, 0, value_start, column_header, None)?;
+        set_cell(output, 0, value_start, column_header)?;
         let row = header_rows - 1;
         for column in 0..pivot.row_fields.array.cols {
             poll_cancellation(context)?;
-            let (value, trace) = output_header(
+            let value = output_header(
                 engine,
                 pivot.headers,
                 pivot.input_has_header,
@@ -310,7 +297,7 @@ fn write_pivot_headers(
                 column,
                 "Row Field",
             )?;
-            set_cell(output, row, column, value, trace)?;
+            set_cell(output, row, column, value)?;
         }
     }
     for (group_index, group) in pivot.column_groups.iter().enumerate() {
@@ -329,22 +316,17 @@ fn write_pivot_headers(
                 .ok_or(ErrorKind::Num)?;
             for level in 0..pivot.column_fields.array.cols {
                 poll_cancellation(context)?;
-                let (label, trace) = output_group_label(
-                    group,
-                    level as usize,
-                    &group.labels[level as usize],
-                    group.label_traces[level as usize],
-                );
+                let label =
+                    output_group_label(group, level as usize, &group.labels[level as usize]);
                 set_cell(
                     output,
                     level + u32::from(show_field_headers),
                     output_column,
                     label,
-                    trace,
                 )?;
             }
             if show_field_headers {
-                let (value, trace) = output_header(
+                let value = output_header(
                     engine,
                     pivot.headers,
                     pivot.input_has_header,
@@ -352,7 +334,7 @@ fn write_pivot_headers(
                     value_column,
                     "Value",
                 )?;
-                set_cell(output, header_rows - 1, output_column, value, trace)?;
+                set_cell(output, header_rows - 1, output_column, value)?;
             }
         }
     }
@@ -482,21 +464,18 @@ fn output_header(
     source: &ArrayEvaluation,
     column: u32,
     generated_prefix: &str,
-) -> Result<(Value, Option<super::super::decimal::DecimalTrace>), ErrorKind> {
+) -> Result<Value, ErrorKind> {
     let use_existing = input_has_header
         && matches!(
             headers,
             FieldHeaders::Automatic | FieldHeaders::ExistingShown
         );
     if use_existing {
-        return Ok((
-            source.array.at(0, column).clone(),
-            source.decimal_at(0, column),
-        ));
+        return Ok(source.array.at(0, column).clone());
     }
     let text = format!("{generated_prefix} {}", u64::from(column) + 1);
     engine.ensure_text_bytes(text.len())?;
-    Ok((Value::Text(text), None))
+    Ok(Value::Text(text))
 }
 
 fn set_cell(
@@ -504,7 +483,6 @@ fn set_cell(
     row: u32,
     column: u32,
     value: Value,
-    trace: Option<super::super::decimal::DecimalTrace>,
 ) -> Result<(), ErrorKind> {
     let index = u64::from(row)
         .checked_mul(u64::from(output.array.cols))
@@ -512,24 +490,18 @@ fn set_cell(
         .and_then(|index| usize::try_from(index).ok())
         .ok_or(ErrorKind::Num)?;
     *output.array.data.get_mut(index).ok_or(ErrorKind::Num)? = value;
-    *output.decimal_traces.get_mut(index).ok_or(ErrorKind::Num)? = trace;
     Ok(())
 }
 
-fn output_group_label(
-    group: &AxisGroup,
-    column: usize,
-    value: &Value,
-    trace: Option<super::super::decimal::DecimalTrace>,
-) -> (Value, Option<super::super::decimal::DecimalTrace>) {
+fn output_group_label(group: &AxisGroup, column: usize, value: &Value) -> Value {
     let structural_blank = match group.kind {
         AxisGroupKind::Detail => false,
         AxisGroupKind::Subtotal { prefix_len } => column >= prefix_len,
         AxisGroupKind::GrandTotal => column > 0,
     };
     if structural_blank {
-        (Value::Text(String::new()), None)
+        Value::Text(String::new())
     } else {
-        (value.clone(), trace)
+        value.clone()
     }
 }

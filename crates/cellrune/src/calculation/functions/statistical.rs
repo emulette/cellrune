@@ -5,6 +5,7 @@ use super::super::ast::Expr;
 use super::super::coerce::to_logical;
 use super::super::criteria::CompiledCriteria;
 use super::super::eval::{Engine, EvalContext};
+use super::super::excel_digits::{Rounding, round_quotient};
 use super::super::runtime::Rect;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
@@ -17,7 +18,7 @@ use super::special_functions::{
 };
 use super::util::{
     ArgumentValue, ExcelSum, collect_argument_values, excel_numeric_arguments,
-    excel_numeric_arguments_with_policy, required_number,
+    excel_numeric_arguments_with_policy, fifteen_digit_rules, required_number,
 };
 
 /// PROB accepts probabilities whose total differs from one by at most this much, the tolerance
@@ -241,8 +242,8 @@ fn probability(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
             Some(expr) => required_number(engine, context, expr)?,
             None => lower,
         };
-        let mut total: ExcelSum = ExcelSum::new(engine);
-        let mut within: ExcelSum = ExcelSum::new(engine);
+        let mut total = ExcelSum::plain();
+        let mut within = ExcelSum::plain();
         for (value, probability) in pairs {
             poll_cancellation(context)?;
             engine.charge_function_iterations(context, 1)?;
@@ -251,9 +252,9 @@ fn probability(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
             if !(0.0..=1.0).contains(&probability) {
                 return Err(ErrorKind::Num);
             }
-            total.add_with_trace(probability, None);
+            total.add(probability);
             if (lower..=upper).contains(&value) {
-                within.add_with_trace(probability, None);
+                within.add(probability);
             }
         }
         if (total.total() - 1.0).abs() > PROBABILITY_TOTAL_TOLERANCE {
@@ -412,7 +413,11 @@ fn percent_rank(
     };
     let raw_rank = rank / gaps as f64;
     let factor = 10_f64.powi(significance);
-    let result = (raw_rank * factor).trunc() / factor;
+    let result = round_quotient(
+        raw_rank * factor,
+        Rounding::TowardZero,
+        fifteen_digit_rules(engine),
+    ) / factor;
     if result.is_finite() {
         Value::Number(result)
     } else {

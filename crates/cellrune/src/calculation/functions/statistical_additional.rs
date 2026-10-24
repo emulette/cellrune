@@ -10,7 +10,7 @@ use super::special_functions::{
     ln_gamma, regularized_gamma_q, standard_normal_density, standard_normal_lower,
 };
 use super::statistical::{numeric_arguments, numeric_arguments_with_policy, variance_value};
-use super::util::{DecimalTraces, collect_argument_values_with_policy, required_number};
+use super::util::{ExcelSum, collect_argument_values_with_policy, required_number};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -198,7 +198,13 @@ fn aggregate_a(
     };
     match aggregate {
         AggregateA::Average if numbers.is_empty() => Value::Error(ErrorKind::Div0),
-        AggregateA::Average => finite(numbers.iter().sum::<f64>() / numbers.len() as f64),
+        AggregateA::Average => {
+            let mut total = ExcelSum::correcting_final_cancellation(engine);
+            for number in &numbers {
+                total.add(*number);
+            }
+            finite(total.total() / numbers.len() as f64)
+        }
         AggregateA::Maximum => Value::Number(numbers.into_iter().reduce(f64::max).unwrap_or(0.0)),
         AggregateA::Minimum => Value::Number(numbers.into_iter().reduce(f64::min).unwrap_or(0.0)),
     }
@@ -217,7 +223,6 @@ fn numbers_a(
         context,
         args,
         SheetSpanPolicy::CollectAcrossSheets,
-        DecimalTraces::Skip,
     )?;
     let mut numbers = Vec::new();
     for item in values {

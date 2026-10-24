@@ -13,6 +13,7 @@ use super::super::scope::{
     ScopeValue,
 };
 use super::super::value::{ErrorKind, Value};
+use super::util::required_number;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -69,7 +70,7 @@ pub(in crate::calculation) fn lambda_scope_value(
     defined_name: Option<DefinedLambdaId>,
 ) -> ScopeValue {
     let Some(definition) = definition_from_args(args) else {
-        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
+        return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(ErrorKind::Value)));
     };
     ScopeValue::Callable(CallableValue::Lambda(std::sync::Arc::new(LambdaClosure {
         parameters: definition.parameters().to_vec(),
@@ -95,29 +96,29 @@ pub(in crate::calculation) fn invoke_callable(
     args: &[Expr],
 ) -> ScopeValue {
     if !callable_accepts_argument_count(callable, args.len()) {
-        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
+        return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(ErrorKind::Value)));
     }
     let mut values = Vec::with_capacity(args.len());
     for arg in args {
         if context.is_cancelled() {
-            return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(
+            return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(
                 ErrorKind::ResourceLimit(CalculationLimitKind::LambdaInvocations),
             )));
         }
         let value = match engine.eval_callable_argument_scope_value(context, arg) {
             Ok(value) => value,
             Err(kind) => {
-                return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+                return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind)));
             }
         };
         if matches!(callable, CallableValue::Lambda(_))
             && let ScopeValue::Scalar(evaluated) = &value
             && let Value::Error(kind) = evaluated.value
         {
-            return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+            return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind)));
         }
         if let Some(kind) = value.engine_issue() {
-            return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+            return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind)));
         }
         values.push(value);
     }
@@ -143,11 +144,11 @@ pub(in crate::calculation) fn invoke_callable_values(
     values: Vec<ScopeValue>,
 ) -> ScopeValue {
     if let Err(kind) = validate_callable_invocation(context, callable, &values) {
-        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+        return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind)));
     }
     match callable {
         CallableValue::Lambda(closure) => invoke_lambda_values(engine, context, closure, values),
-        CallableValue::Builtin(callable) => ScopeValue::Scalar(ScalarEvaluation::untracked(
+        CallableValue::Builtin(callable) => ScopeValue::Scalar(ScalarEvaluation::new(
             super::call_builtin_callable(engine, context, *callable, &values),
         )),
     }
@@ -179,7 +180,7 @@ pub(in crate::calculation) fn invoke_lambda_values(
     values: Vec<ScopeValue>,
 ) -> ScopeValue {
     if closure.parameters.len() != values.len() {
-        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(ErrorKind::Value)));
+        return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(ErrorKind::Value)));
     }
     if let Some(kind) = values.iter().find_map(|value| match value {
         ScopeValue::Scalar(evaluated) => match evaluated.value {
@@ -188,11 +189,11 @@ pub(in crate::calculation) fn invoke_lambda_values(
         },
         _ => None,
     }) {
-        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind)));
+        return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind)));
     }
     let _active_lambda = match context.enter_lambda(engine.calculation_limits()) {
         Ok(active) => active,
-        Err(kind) => return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind))),
+        Err(kind) => return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind))),
     };
     let mut bindings = closure.captured.clone();
     bindings.extend(
@@ -204,7 +205,7 @@ pub(in crate::calculation) fn invoke_lambda_values(
             .map(|(name, value)| ScopeEntry::new(name, value)),
     );
     if context.is_cancelled() {
-        return ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(
+        return ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(
             ErrorKind::ResourceLimit(CalculationLimitKind::LambdaInvocations),
         )));
     }
@@ -236,7 +237,7 @@ pub(super) fn map_array_with_trace(
 
     let arrays = array_exprs
         .iter()
-        .map(|expr| engine.eval_array_with_trace(context, expr))
+        .map(|expr| engine.eval_array_evaluation(context, expr))
         .collect::<Result<Vec<_>, _>>()?;
     if let Some(kind) = arrays.iter().find_map(ArrayEvaluation::engine_issue) {
         return Err(kind);
@@ -253,16 +254,14 @@ pub(super) fn map_array_with_trace(
     let capacity = usize::try_from(cells)
         .map_err(|_| ErrorKind::ResourceLimit(CalculationLimitKind::ArrayCells))?;
     let mut data = Vec::with_capacity(capacity);
-    let mut decimal_traces = Vec::with_capacity(capacity);
     for row in 0..rows {
         for col in 0..cols {
             let values = arrays
                 .iter()
                 .map(|evaluated| {
-                    ScopeValue::Scalar(ScalarEvaluation {
-                        value: element_at(&evaluated.array, row, col).clone(),
-                        decimal_trace: evaluated.decimal_at(row, col),
-                    })
+                    ScopeValue::Scalar(ScalarEvaluation::new(
+                        element_at(&evaluated.array, row, col).clone(),
+                    ))
                 })
                 .collect();
             let iteration = u64::from(row) * u64::from(cols) + u64::from(col);
@@ -273,13 +272,9 @@ pub(super) fn map_array_with_trace(
                 return Err(kind);
             }
             data.push(evaluated.value);
-            decimal_traces.push(evaluated.decimal_trace);
         }
     }
-    Ok(ArrayEvaluation {
-        array: Array { rows, cols, data },
-        decimal_traces,
-    })
+    Ok(ArrayEvaluation::new(Array { rows, cols, data }))
 }
 
 pub(in crate::calculation) fn helper_array_with_trace(
@@ -304,16 +299,15 @@ pub(in crate::calculation) fn helper_scalar_with_trace(
     args: &[Expr],
 ) -> ScalarEvaluation {
     match helper_array_with_trace(engine, context, function, args) {
-        Ok(result) => ScalarEvaluation {
-            value: result
+        Ok(result) => ScalarEvaluation::new(
+            result
                 .array
                 .data
                 .first()
                 .cloned()
                 .unwrap_or(Value::Error(ErrorKind::Value)),
-            decimal_trace: result.decimal_traces.first().copied().flatten(),
-        },
-        Err(kind) => ScalarEvaluation::untracked(Value::Error(kind)),
+        ),
+        Err(kind) => ScalarEvaluation::new(Value::Error(kind)),
     }
 }
 
@@ -329,7 +323,7 @@ fn callable_value(
 }
 
 fn scalar_scope(value: Value) -> ScopeValue {
-    ScopeValue::Scalar(ScalarEvaluation::untracked(value))
+    ScopeValue::Scalar(ScalarEvaluation::new(value))
 }
 
 fn lambda_result_scalar(
@@ -372,7 +366,7 @@ fn byrow(
     if args.len() != 2 {
         return Err(ErrorKind::Value);
     }
-    let input = engine.eval_array_with_trace(context, &args[0])?;
+    let input = engine.eval_array_evaluation(context, &args[0])?;
     let callable = callable_value(engine, context, &args[1])?;
     if !callable_accepts_argument_count(&callable, 1) {
         return Err(ErrorKind::Value);
@@ -383,21 +377,15 @@ fn byrow(
         u64::from(input.array.rows) * u64::from(input.array.cols),
     )?;
     let mut data = Vec::with_capacity(input.array.rows as usize);
-    let mut decimal_traces = Vec::with_capacity(input.array.rows as usize);
     for row in 0..input.array.rows {
         let row_data = (0..input.array.cols)
             .map(|col| element_at(&input.array, row, col).clone())
             .collect();
-        let row_value = ScopeValue::Array(Arc::new(ArrayEvaluation {
-            array: Array {
-                rows: 1,
-                cols: input.array.cols,
-                data: row_data,
-            },
-            decimal_traces: (0..input.array.cols)
-                .map(|col| input.decimal_at(row, col))
-                .collect(),
-        }));
+        let row_value = ScopeValue::Array(Arc::new(ArrayEvaluation::new(Array {
+            rows: 1,
+            cols: input.array.cols,
+            data: row_data,
+        })));
         let result = invoke_callable_values(
             engine,
             context.at_iteration(u64::from(row)),
@@ -409,16 +397,12 @@ fn byrow(
             return Err(kind);
         }
         data.push(scalar.value);
-        decimal_traces.push(scalar.decimal_trace);
     }
-    Ok(ArrayEvaluation {
-        array: Array {
-            rows: input.array.rows,
-            cols: 1,
-            data,
-        },
-        decimal_traces,
-    })
+    Ok(ArrayEvaluation::new(Array {
+        rows: input.array.rows,
+        cols: 1,
+        data,
+    }))
 }
 
 fn bycol(
@@ -429,7 +413,7 @@ fn bycol(
     if args.len() != 2 {
         return Err(ErrorKind::Value);
     }
-    let input = engine.eval_array_with_trace(context, &args[0])?;
+    let input = engine.eval_array_evaluation(context, &args[0])?;
     let callable = callable_value(engine, context, &args[1])?;
     if !callable_accepts_argument_count(&callable, 1) {
         return Err(ErrorKind::Value);
@@ -440,21 +424,15 @@ fn bycol(
         u64::from(input.array.rows) * u64::from(input.array.cols),
     )?;
     let mut data = Vec::with_capacity(input.array.cols as usize);
-    let mut decimal_traces = Vec::with_capacity(input.array.cols as usize);
     for col in 0..input.array.cols {
         let col_data = (0..input.array.rows)
             .map(|row| element_at(&input.array, row, col).clone())
             .collect();
-        let col_value = ScopeValue::Array(Arc::new(ArrayEvaluation {
-            array: Array {
-                rows: input.array.rows,
-                cols: 1,
-                data: col_data,
-            },
-            decimal_traces: (0..input.array.rows)
-                .map(|row| input.decimal_at(row, col))
-                .collect(),
-        }));
+        let col_value = ScopeValue::Array(Arc::new(ArrayEvaluation::new(Array {
+            rows: input.array.rows,
+            cols: 1,
+            data: col_data,
+        })));
         let result = invoke_callable_values(
             engine,
             context.at_iteration(u64::from(col)),
@@ -466,16 +444,12 @@ fn bycol(
             return Err(kind);
         }
         data.push(scalar.value);
-        decimal_traces.push(scalar.decimal_trace);
     }
-    Ok(ArrayEvaluation {
-        array: Array {
-            rows: 1,
-            cols: input.array.cols,
-            data,
-        },
-        decimal_traces,
-    })
+    Ok(ArrayEvaluation::new(Array {
+        rows: 1,
+        cols: input.array.cols,
+        data,
+    }))
 }
 
 fn reduce(
@@ -491,7 +465,7 @@ fn reduce(
     if args.len() != 3 {
         return Err(ErrorKind::Value);
     }
-    let input = engine.eval_array_with_trace(context, &args[1])?;
+    let input = engine.eval_array_evaluation(context, &args[1])?;
     let callable = callable_value(engine, context, &args[2])?;
     if !callable_accepts_argument_count(&callable, 2) {
         return Err(ErrorKind::Value);
@@ -511,10 +485,7 @@ fn reduce(
             return Err(ErrorKind::Calc);
         };
         start_index = 1;
-        ScopeValue::Scalar(ScalarEvaluation {
-            value: value.clone(),
-            decimal_trace: input.decimal_traces[0],
-        })
+        ScopeValue::Scalar(ScalarEvaluation::new(value.clone()))
     } else {
         engine.eval_scope_value(context, &args[0])
     };
@@ -524,11 +495,9 @@ fn reduce(
         return Err(kind);
     }
     let mut output = Vec::with_capacity(input.array.data.len());
-    let mut decimal_traces = Vec::with_capacity(input.array.data.len());
     if scan && omitted_initial {
         let scalar = lambda_result_scalar(engine, context, &accumulator)?;
         output.push(scalar.value);
-        decimal_traces.push(scalar.decimal_trace);
     }
     for (index, value) in input.array.data.iter().enumerate().skip(start_index) {
         accumulator = invoke_callable_values(
@@ -537,10 +506,7 @@ fn reduce(
             &callable,
             vec![
                 accumulator,
-                ScopeValue::Scalar(ScalarEvaluation {
-                    value: value.clone(),
-                    decimal_trace: input.decimal_traces[index],
-                }),
+                ScopeValue::Scalar(ScalarEvaluation::new(value.clone())),
             ],
         );
         if scan {
@@ -549,20 +515,16 @@ fn reduce(
                 return Err(kind);
             }
             output.push(scalar.value.clone());
-            decimal_traces.push(scalar.decimal_trace);
         } else if let Some(kind) = accumulator.engine_issue() {
             return Err(kind);
         }
     }
     if scan {
-        Ok(ArrayEvaluation {
-            array: Array {
-                rows: input.array.rows,
-                cols: input.array.cols,
-                data: output,
-            },
-            decimal_traces,
-        })
+        Ok(ArrayEvaluation::new(Array {
+            rows: input.array.rows,
+            cols: input.array.cols,
+            data: output,
+        }))
     } else {
         engine.array_from_scope_value(context, &accumulator)
     }
@@ -576,7 +538,7 @@ pub(in crate::calculation) fn reduce_scope_value(
     if args.len() != 3 {
         return Err(ErrorKind::Value);
     }
-    let input = engine.eval_array_with_trace(context, &args[1])?;
+    let input = engine.eval_array_evaluation(context, &args[1])?;
     let callable = callable_value(engine, context, &args[2])?;
     if !callable_accepts_argument_count(&callable, 2) {
         return Err(ErrorKind::Value);
@@ -596,10 +558,7 @@ pub(in crate::calculation) fn reduce_scope_value(
             return Err(ErrorKind::Calc);
         };
         start_index = 1;
-        ScopeValue::Scalar(ScalarEvaluation {
-            value: value.clone(),
-            decimal_trace: input.decimal_traces[0],
-        })
+        ScopeValue::Scalar(ScalarEvaluation::new(value.clone()))
     } else {
         engine.eval_scope_value(context, &args[0])
     };
@@ -613,10 +572,7 @@ pub(in crate::calculation) fn reduce_scope_value(
             &callable,
             vec![
                 accumulator,
-                ScopeValue::Scalar(ScalarEvaluation {
-                    value: value.clone(),
-                    decimal_trace: input.decimal_traces[index],
-                }),
+                ScopeValue::Scalar(ScalarEvaluation::new(value.clone())),
             ],
         );
         if let Some(kind) = accumulator.engine_issue() {
@@ -634,8 +590,8 @@ fn makearray(
     if args.len() != 3 {
         return Err(ErrorKind::Value);
     }
-    let rows = engine.eval_number_with_trace(context, &args[0])?.0;
-    let cols = engine.eval_number_with_trace(context, &args[1])?.0;
+    let rows = required_number(engine, context, &args[0])?;
+    let cols = required_number(engine, context, &args[1])?;
     if rows < 1.0 || cols < 1.0 || rows.fract() != 0.0 || cols.fract() != 0.0 {
         return Err(ErrorKind::Value);
     }
@@ -649,7 +605,6 @@ fn makearray(
         return Err(ErrorKind::Value);
     }
     let mut data = Vec::with_capacity(cells as usize);
-    let mut decimal_traces = Vec::with_capacity(cells as usize);
     for row in 1..=rows {
         for col in 1..=cols {
             let iteration = u64::from(row - 1) * u64::from(cols) + u64::from(col - 1);
@@ -667,13 +622,9 @@ fn makearray(
                 return Err(kind);
             }
             data.push(scalar.value);
-            decimal_traces.push(scalar.decimal_trace);
         }
     }
-    Ok(ArrayEvaluation {
-        array: Array { rows, cols, data },
-        decimal_traces,
-    })
+    Ok(ArrayEvaluation::new(Array { rows, cols, data }))
 }
 
 pub(in crate::calculation) fn map_scalar_with_trace(
@@ -682,16 +633,15 @@ pub(in crate::calculation) fn map_scalar_with_trace(
     args: &[Expr],
 ) -> ScalarEvaluation {
     match map_array_with_trace(engine, context, args) {
-        Ok(mut evaluated) => ScalarEvaluation {
-            value: evaluated
+        Ok(mut evaluated) => ScalarEvaluation::new(
+            evaluated
                 .array
                 .data
                 .drain(..)
                 .next()
                 .unwrap_or(Value::Error(ErrorKind::Value)),
-            decimal_trace: evaluated.decimal_traces.drain(..).next().flatten(),
-        },
-        Err(kind) => ScalarEvaluation::untracked(Value::Error(kind)),
+        ),
+        Err(kind) => ScalarEvaluation::new(Value::Error(kind)),
     }
 }
 
@@ -704,7 +654,7 @@ pub(in crate::calculation) fn let_scope_value(
         is_final.then(|| engine.eval_scope_value(scoped, expr))
     }) {
         Ok(value) => value,
-        Err(kind) => ScopeValue::Scalar(ScalarEvaluation::untracked(Value::Error(kind))),
+        Err(kind) => ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind))),
     }
 }
 
