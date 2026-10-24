@@ -799,8 +799,15 @@ fn selected_order_statistics_match_a_full_sort_bit_for_bit() {
             sorted[lower] + (sorted[upper] - sorted[lower]) * fraction
         });
     }
-    for target in [sorted[0], 3.25, 0.0, sorted[20] + 0.5, sorted[count - 1]] {
-        formulas.push(format!("PERCENTRANK.INC(A1:A61,{target:?},6)"));
+    // Targets read from the values keep every digit; a formula literal keeps fifteen.
+    for (target_formula, target) in [
+        ("MIN(A1:A61)", sorted[0]),
+        ("3.25", 3.25),
+        ("0", 0.0),
+        ("SMALL(A1:A61,21)+0.5", sorted[20] + 0.5),
+        ("MAX(A1:A61)", sorted[count - 1]),
+    ] {
+        formulas.push(format!("PERCENTRANK.INC(A1:A61,{target_formula},6)"));
         let below = sorted.partition_point(|number| *number < target);
         let raw = if sorted[below] == target {
             below as f64 / (count - 1) as f64
@@ -809,7 +816,12 @@ fn selected_order_statistics_match_a_full_sort_bit_for_bit() {
             (lower as f64 + (target - sorted[lower]) / (sorted[below] - sorted[lower]))
                 / (count - 1) as f64
         };
-        expected.push((raw * 1e6).trunc() / 1e6);
+        // Excel reads the scaled rank to fifteen significant digits before truncating it:
+        // PERCENTRANK.INC({1,...,11},3.3,3) is 0.23, although the binary 230 is 229.99999999999997.
+        let scaled: f64 = format!("{:.14e}", raw * 1e6)
+            .parse()
+            .expect("formatted number");
+        expected.push(scaled.trunc() / 1e6);
     }
 
     let addresses = (0..formulas.len())

@@ -1,9 +1,10 @@
 use super::super::ast::Expr;
 use super::super::coerce::to_number;
 use super::super::eval::{Engine, EvalContext};
+use super::super::excel_digits::{Rounding, round_quotient, round_to_digits};
 use super::super::value::{ErrorKind, Value};
 use super::kernel::MathFunction;
-use super::util::{collect_argument_values, required_number, required_text};
+use super::util::{collect_argument_values, fifteen_digit_rules, required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -25,11 +26,11 @@ pub(super) fn call(
         MathFunction::Sqrt => unary_checked(engine, context, args, |number| {
             (number >= 0.0).then(|| number.sqrt())
         }),
-        MathFunction::Round => round(engine, context, args, RoundMode::Nearest),
+        MathFunction::Round => round(engine, context, args, Rounding::Nearest),
         MathFunction::RoundDown | MathFunction::Trunc => {
-            round(engine, context, args, RoundMode::TowardZero)
+            round(engine, context, args, Rounding::TowardZero)
         }
-        MathFunction::RoundUp => round(engine, context, args, RoundMode::AwayFromZero),
+        MathFunction::RoundUp => round(engine, context, args, Rounding::AwayFromZero),
         MathFunction::Mod => checked_binary(engine, context, args, excel_mod),
         MathFunction::Power => checked_binary(engine, context, args, excel_power),
         MathFunction::Ceiling => multiple(engine, context, args, true),
@@ -145,17 +146,15 @@ fn excel_power(base: f64, exponent: f64) -> Result<f64, ErrorKind> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum RoundMode {
-    Nearest,
-    TowardZero,
-    AwayFromZero,
-}
-
-fn round(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], mode: RoundMode) -> Value {
-    let valid_len = match mode {
-        RoundMode::TowardZero => args.len() == 1 || args.len() == 2,
-        RoundMode::Nearest | RoundMode::AwayFromZero => args.len() == 2,
+fn round(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    rounding: Rounding,
+) -> Value {
+    let valid_len = match rounding {
+        Rounding::TowardZero => args.len() == 1 || args.len() == 2,
+        _ => args.len() == 2,
     };
     if !valid_len {
         return Value::Error(ErrorKind::Value);
@@ -171,28 +170,8 @@ fn round(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], mode: Rou
         },
         None => 0,
     };
-    let scale = 10_f64.powi(digits.saturating_abs());
-    let scaled = if digits >= 0 {
-        number * scale
-    } else {
-        number / scale
-    };
-    let rounded = match mode {
-        RoundMode::Nearest => scaled.round(),
-        RoundMode::TowardZero => scaled.trunc(),
-        RoundMode::AwayFromZero => {
-            if scaled.is_sign_negative() {
-                scaled.floor()
-            } else {
-                scaled.ceil()
-            }
-        }
-    };
-    finite(if digits >= 0 {
-        rounded / scale
-    } else {
-        rounded * scale
-    })
+    round_to_digits(number, digits, rounding, fifteen_digit_rules(engine))
+        .map_or(Value::Error(ErrorKind::Num), finite)
 }
 
 fn multiple(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], ceiling: bool) -> Value {
@@ -219,19 +198,12 @@ fn multiple(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], ceilin
         return Value::Error(ErrorKind::Num);
     }
     let magnitude = significance.abs();
-    let quotient = number / magnitude;
-    let rounded = if ceiling {
-        if number >= 0.0 || significance > 0.0 {
-            quotient.ceil()
-        } else {
-            quotient.floor()
-        }
-    } else if number >= 0.0 || significance > 0.0 {
-        quotient.floor()
-    } else {
-        quotient.ceil()
+    let away_from_zero = number < 0.0 && significance < 0.0;
+    let rounding = match (ceiling, away_from_zero) {
+        (true, false) | (false, true) => Rounding::Up,
+        (true, true) | (false, false) => Rounding::Down,
     };
-    finite(rounded * magnitude)
+    finite(round_quotient(number / magnitude, rounding, fifteen_digit_rules(engine)) * magnitude)
 }
 
 fn parity_round(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], odd: bool) -> Value {
@@ -296,7 +268,8 @@ fn mround(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
     if number != 0.0 && number.is_sign_negative() != significance.is_sign_negative() {
         return Value::Error(ErrorKind::Num);
     }
-    finite((number / significance).round() * significance)
+    let quotient = number / significance;
+    finite(round_quotient(quotient, Rounding::Nearest, fifteen_digit_rules(engine)) * significance)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -346,16 +319,16 @@ fn modern_multiple(
         },
         None => false,
     };
-    let quotient = number / significance;
-    let rounded = match operation {
-        ModernMultiple::CeilingPrecise => quotient.ceil(),
-        ModernMultiple::FloorPrecise => quotient.floor(),
-        ModernMultiple::CeilingMath if number < 0.0 && mode => quotient.floor(),
-        ModernMultiple::CeilingMath => quotient.ceil(),
-        ModernMultiple::FloorMath if number < 0.0 && mode => quotient.ceil(),
-        ModernMultiple::FloorMath => quotient.floor(),
+    let rounding = match operation {
+        ModernMultiple::CeilingPrecise => Rounding::Up,
+        ModernMultiple::FloorPrecise => Rounding::Down,
+        ModernMultiple::CeilingMath if number < 0.0 && mode => Rounding::Down,
+        ModernMultiple::CeilingMath => Rounding::Up,
+        ModernMultiple::FloorMath if number < 0.0 && mode => Rounding::Up,
+        ModernMultiple::FloorMath => Rounding::Down,
     };
-    finite(rounded * significance)
+    let quotient = number / significance;
+    finite(round_quotient(quotient, rounding, fifteen_digit_rules(engine)) * significance)
 }
 
 fn base(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
