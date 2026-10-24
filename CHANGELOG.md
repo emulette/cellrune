@@ -18,6 +18,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - The `LINEST` and `LOGEST` statistics scale the exact-fit test with the response. A response
   whose total sum of squares is below about `1.4e-14`, such as values near `1e-8`, no longer has
   its residuals dropped, so `R²` is not reported as 1 with a zero standard error.
+- `BITLSHIFT`, and `BITRSHIFT` with a negative shift, return `#NUM!` when the result passes
+  `2^48 - 1`. A shift that pushed bits past 64 returned the truncated remainder, such as
+  `BITLSHIFT(1073741825, 40)` returning 1099511627776.
 
 ## [0.1.27] - 2026-10-24
 

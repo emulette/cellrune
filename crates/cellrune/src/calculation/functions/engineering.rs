@@ -177,8 +177,10 @@ fn bit_shift(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], left:
     let shift_left = left == (shift >= 0);
     let amount = shift.unsigned_abs();
     let result = if shift_left {
-        number
-            .checked_shl(amount)
+        // A 48-bit value shifted by up to 53 bits can pass 64 bits, so shift in u128 before the
+        // range check instead of letting u64 drop the high bits.
+        u64::try_from(u128::from(number) << amount)
+            .ok()
             .filter(|result| *result <= MAX_BIT_VALUE)
     } else {
         number.checked_shr(amount)

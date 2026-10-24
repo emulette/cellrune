@@ -402,6 +402,24 @@ fn second_expansion_wave_rejects_invalid_domains_and_widths() {
 }
 
 #[test]
+fn left_bit_shifts_past_48_bits_return_num() {
+    let cases = [
+        number("BITLSHIFT(1,47)", 140_737_488_355_328.0, 0.0),
+        error("BITLSHIFT(1,48)", ExcelError::Number),
+        error("BITLSHIFT(1073741825,40)", ExcelError::Number),
+        error("BITLSHIFT(281474976710655,53)", ExcelError::Number),
+        error("BITRSHIFT(1073741825,-40)", ExcelError::Number),
+        number("BITRSHIFT(1073741825,-17)", 140_737_488_486_400.0, 0.0),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn iso_week_numbers_count_weeks_from_the_first_thursday() {
     let cases = [
         number("ISOWEEKNUM(DATE(2021,1,1))", 53.0, 0.0),
