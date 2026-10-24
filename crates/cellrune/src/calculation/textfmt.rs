@@ -211,8 +211,8 @@ fn render_literal_section(
 }
 
 /// The most characters, minus sign included, a number shows in `General`. Excel rounds a longer
-/// number or writes it in scientific notation (`TEXT(PI(),"General")` is `3.141592654` and
-/// `TEXT(1E+20,"General")` is `1E+20`), which is not reproduced.
+/// number or writes it in scientific notation (`TEXT(PI(),"General")` is `3.141592654`), which is
+/// not reproduced.
 const GENERAL_WIDTH: usize = 11;
 
 /// The smallest magnitude `General` shows as plain decimals here; where Excel switches smaller

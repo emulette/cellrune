@@ -144,11 +144,8 @@ mod tests {
     #[test]
     fn general_numbers_longer_than_eleven_characters_are_unsupported() {
         assert_eq!(display(number(1234.5), "General").as_deref(), Ok("1234.5"));
-        // Excel shows "1E+20" and "3.141592654".
-        assert_eq!(
-            display(number(1e20), "General"),
-            Err(DisplayFormatError::Unsupported)
-        );
+        assert_eq!(display(number(1e20), "General").as_deref(), Ok("1E+20"));
+        // Excel shows "3.141592654".
         assert_eq!(
             display(number(std::f64::consts::PI), "General"),
             Err(DisplayFormatError::Unsupported)

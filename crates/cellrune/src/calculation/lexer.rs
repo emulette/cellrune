@@ -1,6 +1,7 @@
 use super::CalculationLimitKind;
 use super::ast::NumberLiteral;
 use super::error::ParseErrorCode;
+use super::excel_digits::fifteen_digit_literal;
 use super::syntax::SourceSpan;
 use super::value::ErrorKind;
 
@@ -251,8 +252,9 @@ fn drop_trailing_dot(previous: Option<&mut SpannedToken>, input: &str) -> bool {
             let text = &input[previous.span.start..previous.span.end];
             text.strip_suffix('.')
                 .filter(|stem| !stem.is_empty() && stem.bytes().all(|byte| byte.is_ascii_digit()))
-                .and_then(|stem| stem.parse::<f64>().ok().map(|value| (stem, value)))
-                .map(|(stem, value)| Token::Number(NumberLiteral::from_literal(value, stem)))
+                .map(fifteen_digit_literal)
+                .and_then(|stem| stem.parse::<f64>().ok())
+                .map(|value| Token::Number(NumberLiteral::new(value)))
         }
         _ => None,
     };
@@ -447,8 +449,10 @@ pub(super) fn lex_spanned(input: &str, max_tokens: u64) -> Result<LexedFormula, 
                         cursor = exponent;
                     }
                 }
-                let literal = &input
-                    [byte_at(&offsets, input.len(), start)..byte_at(&offsets, input.len(), cursor)];
+                let literal = fifteen_digit_literal(
+                    &input[byte_at(&offsets, input.len(), start)
+                        ..byte_at(&offsets, input.len(), cursor)],
+                );
                 let number = literal.parse::<f64>().map_err(|_| {
                     error(
                         &offsets,
@@ -461,7 +465,7 @@ pub(super) fn lex_spanned(input: &str, max_tokens: u64) -> Result<LexedFormula, 
                 index = cursor;
                 push_token!(
                     if number.is_finite() {
-                        Token::Number(NumberLiteral::from_literal(number, literal))
+                        Token::Number(NumberLiteral::new(number))
                     } else {
                         Token::ErrorLit(ErrorKind::Num)
                     },

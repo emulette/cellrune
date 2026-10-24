@@ -312,8 +312,8 @@ fn general_shows_the_number_as_text() {
 
 #[test]
 fn general_leaves_numbers_excel_shortens_unsupported() {
-    // Excel shows "1E+20", "1.23457E+11", "3.141592654", and "-1.23457E+10".
-    assert_unsupported(1e20, "General");
+    // Excel shows "1.23457E+11", "3.141592654", and "-1.23457E+10".
+    assert_text(1e20, "General", "1E+20");
     assert_unsupported(123_456_789_012.0, "General");
     assert_unsupported(std::f64::consts::PI, "General");
     assert_unsupported(-12_345_678_901.0, "General");

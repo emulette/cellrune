@@ -1,6 +1,7 @@
 use std::fmt;
 
 use super::CalculationLimitKind;
+use super::excel_digits::general_text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
@@ -88,34 +89,9 @@ impl Value {
     }
 }
 
+/// The text a number converts to when it joins text; see [`general_text`].
 pub fn number_to_general_text(value: f64) -> String {
-    let truncated = truncate_to_excel_precision(value);
-    if truncated == truncated.trunc() && truncated.abs() < 1e15 {
-        format!("{}", truncated as i64)
-    } else {
-        format!("{truncated}")
-    }
-}
-
-fn truncate_to_excel_precision(value: f64) -> f64 {
-    if value == 0.0 || !value.is_finite() {
-        return value;
-    }
-    let decimal_exponent = value.abs().log10().floor() as i32;
-    let scale = 10_f64.powi(14 - decimal_exponent);
-    if !scale.is_finite() || scale == 0.0 {
-        return value;
-    }
-    let scaled = value * scale;
-    if !scaled.is_finite() {
-        return value;
-    }
-    let truncated = scaled.trunc() / scale;
-    if truncated.is_finite() {
-        truncated
-    } else {
-        value
-    }
+    general_text(value)
 }
 
 impl fmt::Display for Value {
@@ -128,20 +104,5 @@ impl fmt::Display for Value {
             Value::Logical(false) => formatter.write_str("FALSE"),
             Value::Error(kind) => formatter.write_str(kind.as_str()),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::number_to_general_text;
-
-    #[test]
-    fn general_text_hides_binary_noise_at_excel_precision() {
-        assert_eq!(number_to_general_text(0.1 + 0.2), "0.3");
-        assert_eq!(
-            number_to_general_text(1.234_567_890_123_456),
-            "1.23456789012345"
-        );
-        assert_eq!(number_to_general_text(-0.0), "0");
     }
 }

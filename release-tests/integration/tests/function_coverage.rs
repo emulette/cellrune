@@ -1,8 +1,8 @@
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationHints, CalculationOptions, CellAddress,
-    CellContent, CellValue, DateSystem, ExcelError, FormulaCell, FormulaDialect, FormulaMetadata,
-    FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet, SheetId, SheetName,
-    SheetVisibility, WorkbookSnapshot, WorkbookSource, calculate_workbook,
+    ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationHints,
+    CalculationOptions, CellAddress, CellContent, CellValue, DateSystem, ExcelError, FormulaCell,
+    FormulaDialect, FormulaMetadata, FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet,
+    SheetId, SheetName, SheetVisibility, WorkbookSnapshot, WorkbookSource, calculate_workbook,
     scan_formula_capabilities,
 };
 
@@ -112,12 +112,15 @@ fn new_functions_propagate_excel_errors_at_documented_boundaries() {
 }
 
 #[test]
-fn rounding_digits_below_the_integer_range_return_num() {
+fn rounding_at_places_beyond_a_double_zeroes_or_leaves_the_value() {
     let cases = [
-        error("ROUND(1.5,-2147483648)", ExcelError::Number),
+        number("ROUND(1.5,-2147483648)", 0.0, 0.0),
         error("ROUNDUP(1.5,-2147483648)", ExcelError::Number),
-        error("ROUNDDOWN(1.5,-2147483648)", ExcelError::Number),
-        error("TRUNC(1.5,-1E10)", ExcelError::Number),
+        number("ROUNDDOWN(1.5,-2147483648)", 0.0, 0.0),
+        number("TRUNC(1.5,-1E10)", 0.0, 0.0),
+        number("ROUND(1,400)", 1.0, 0.0),
+        number("ROUND(1E307,2)", 1e307, 0.0),
+        number("ROUNDUP(1E307,2)", 1e307, 0.0),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 
@@ -396,6 +399,83 @@ fn second_expansion_wave_rejects_invalid_domains_and_widths() {
 
     assert!(scan_formula_capabilities(&workbook).is_supported());
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
+fn rounding_reads_the_scaled_quotient_to_fifteen_significant_digits() {
+    let cases = [
+        number("ROUND(1.005,2)", 1.01, 0.0),
+        number("ROUND(-1.005,2)", -1.01, 0.0),
+        number("ROUND(0.285,2)", 0.29, 0.0),
+        number("ROUNDDOWN(1.15,2)", 1.15, 0.0),
+        number("TRUNC(1.15,2)", 1.15, 0.0),
+        number("ROUNDUP(0.1+0.2,1)", 0.3, 0.0),
+        // The quotient is corrected to whole units, but the product is not snapped to 15 digits:
+        // both are three units of 0.1, which Excel displays as 0.3.
+        number("CEILING(0.1+0.2,0.1)", 0.300_000_000_000_000_04, 0.0),
+        number("FLOOR(0.3,0.1)", 0.300_000_000_000_000_04, 0.0),
+        number("FLOOR.MATH(0.7,0.1)", 0.700_000_000_000_000_1, 0.0),
+        number("MROUND(1.05,0.1)", 1.1, 0.0),
+        number("ROUND(2.5,0)", 3.0, 0.0),
+        number("ROUND(1234.5,-2)", 1200.0, 0.0),
+        number(
+            "PERCENTRANK.INC({1,2,3,4,5,6,7,8,9,10,11},3.3,3)",
+            0.23,
+            0.0,
+        ),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
+fn numbers_join_text_with_fifteen_digits_and_literals_keep_fifteen() {
+    // Excel 16.0 build 20326.
+    let cases = [
+        text("2/3&\"\"", "0.666666666666667"),
+        text("(1-1E-16)&\"\"", "1"),
+        text("(1234567890123450+8)&\"\"", "1234567890123460"),
+        text("1234567890123456&\"\"", "1234567890123450"),
+        text("0.99999999999999999&\"\"", "0.999999999999999"),
+        text("1E+19&\"\"", "10000000000000000000"),
+        text("1E+20&\"\"", "1E+20"),
+        text("1.5E-17&\"\"", "0.000000000000000015"),
+        text("1.23456E-14&\"\"", "1.23456E-14"),
+        text("PI()*1E-5&\"\"", "3.14159265358979E-05"),
+        text("CEILING(0.1+0.2,0.1)&\"\"", "0.3"),
+        number("LEN(1/3)", 17.0, 0.0),
+        logical("0.30000000000000004=0.3", true),
+        number("(0.30000000000000004-0.3)*1E+17", 0.0, 0.0),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
+fn ieee754_rounding_keeps_the_binary_quotient() {
+    let cases = [
+        number("ROUND(1.005,2)", 1.0, 0.0),
+        number("ROUNDDOWN(1.15,2)", 1.14, 0.0),
+        number("FLOOR(0.3,0.1)", 0.2, 0.0),
+        number("ROUND(1,400)", 1.0, 0.0),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754),
+    );
     for (offset, case) in cases.iter().enumerate() {
         assert_expected(&calculation, offset as u32 + 1, case);
     }
