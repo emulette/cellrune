@@ -18,6 +18,10 @@ pub struct EditReceipt {
     /// Whether a cell's number format changed with its value and formula kept, which only
     /// formulas reading number formats see.
     pub(super) number_formats_changed: bool,
+    /// The sheets whose cells a row, column, or range move shifted without changing a defined
+    /// name or a table. The cells it vacated and filled are not in `calculation_changed_cells`,
+    /// which the sheets' contents before and after tell.
+    pub(super) moved_cell_sheets: Vec<SheetId>,
     pub(super) inverse: Option<Box<EditInverse>>,
 }
 
@@ -52,6 +56,7 @@ impl EditReceipt {
             cell_formulas_changed_topology_only: self.cell_formulas_changed_topology_only,
             calculation_metadata_changed: self.calculation_metadata_changed,
             number_formats_changed: self.number_formats_changed,
+            moved_cell_sheets: clone_copy_slice(&self.moved_cell_sheets, cancelled)?,
             inverse: self.inverse.clone(),
         })
     }
@@ -108,6 +113,12 @@ impl EditReceipt {
     }
 
     /// Returns whether a cell's number format changed while its value and formula stayed.
+    /// Returns the sheets whose cells moved, as [`Self::cell_formulas_changed_topology_only`] counts
+    /// them: the cells that moved changed as formula and value edits would change them.
+    pub(crate) fn moved_cell_sheets(&self) -> &[SheetId] {
+        &self.moved_cell_sheets
+    }
+
     pub(crate) const fn number_formats_changed(&self) -> bool {
         self.number_formats_changed
     }

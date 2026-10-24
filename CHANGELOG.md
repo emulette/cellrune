@@ -436,6 +436,13 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Changed
 
+- An automatic session recalculation after inserting, deleting, or moving rows, columns, or a
+  range that changed no defined name and no table treats the move as edits of the cells it
+  vacated, filled, and rewrote: it parses and evaluates the formulas that moved or changed and
+  the formulas reading the cells that moved, and reports `Incremental` with `DirtySubset` instead
+  of compiling the workbook again with `Full` and `TopologyChanged`. A move whose formulas are more
+  than half of the workbook's, an array formula among them, or a move with another change that
+  needs compiling still compiles the workbook again. Results are those of a full calculation.
 - A full calculation whose pass read a formula before calculating it evaluates again, in the
   next pass, only those formulas and the formulas that wait for them, keeping the others' results,
   which read only final values; a pass that cycles or blocks other formulas, limits other

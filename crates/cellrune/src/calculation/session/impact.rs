@@ -4,7 +4,8 @@ use super::super::eval::CompiledWorkbook;
 use super::super::functions::descriptor::Volatility;
 use super::super::runtime::CellId;
 use crate::{
-    CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, WorkbookSnapshot,
+    CalculationCellId, CalculationSnapshot, CellContent, MaterializedResultOrigin, SheetId,
+    WorkbookSnapshot,
 };
 
 const CHARGED_WORK_POLL_INTERVAL: u32 = 256;
@@ -240,4 +241,58 @@ pub(super) fn formula_cells_from_workbook(
         }
     }
     Ok(formulas)
+}
+
+/// Returns the cells of `sheets` whose content or number format differs between `before` and
+/// `after`, in sheet and row-major order: those a row, column, or range move vacated or filled.
+pub(super) fn moved_cells(
+    before: &WorkbookSnapshot,
+    after: &WorkbookSnapshot,
+    sheets: &[SheetId],
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<CalculationCellId>, ()> {
+    let mut charger = ImpactWorkCharger {
+        charged: 0,
+        cancelled,
+    };
+    let mut moved = Vec::new();
+    for sheet_id in sheets {
+        let (mut old, mut new) = (
+            sheet_cells(before, *sheet_id).peekable(),
+            sheet_cells(after, *sheet_id).peekable(),
+        );
+        loop {
+            charger.charge()?;
+            // `Sheet::cells` runs in row-major order.
+            let position =
+                |cell: &&crate::Cell| (cell.address().row().get(), cell.address().column().get());
+            let address = match (old.peek(), new.peek()) {
+                (None, None) => break,
+                (Some(_), None) => old.next().map(crate::Cell::address),
+                (None, Some(_)) => new.next().map(crate::Cell::address),
+                (Some(left), Some(right)) => match position(left).cmp(&position(right)) {
+                    std::cmp::Ordering::Less => old.next().map(crate::Cell::address),
+                    std::cmp::Ordering::Greater => new.next().map(crate::Cell::address),
+                    std::cmp::Ordering::Equal => {
+                        let (left, right) = (old.next(), new.next());
+                        (left != right)
+                            .then(|| left.map(crate::Cell::address))
+                            .flatten()
+                    }
+                },
+            };
+            moved.extend(address.map(|address| CalculationCellId::new(*sheet_id, address)));
+        }
+    }
+    Ok(moved)
+}
+
+fn sheet_cells(
+    workbook: &WorkbookSnapshot,
+    sheet_id: SheetId,
+) -> impl Iterator<Item = &crate::Cell> {
+    workbook
+        .sheet_by_id(sheet_id)
+        .into_iter()
+        .flat_map(crate::Sheet::cells)
 }

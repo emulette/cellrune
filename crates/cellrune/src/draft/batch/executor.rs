@@ -93,6 +93,7 @@ impl WorkbookDraft {
                 cell_formulas_changed_topology_only: false,
                 calculation_metadata_changed: false,
                 number_formats_changed: false,
+                moved_cell_sheets: Vec::new(),
                 inverse: None,
             });
         }
@@ -139,6 +140,7 @@ impl WorkbookDraft {
         let mut cell_formulas_changed = false;
         let mut calculation_metadata_changed = false;
         let mut number_formats_changed = false;
+        let mut moved_cell_sheets = BTreeSet::new();
         let mut semantic_changed = false;
         // Every ID the workbook or this batch has used stays taken, including those of sheets
         // deleted since, so an added sheet takes the one after the highest.
@@ -985,6 +987,7 @@ impl WorkbookDraft {
                 | WorkbookChange::MoveRange { .. } => {
                     let (sheet_id, edit) =
                         grid_change(change)?.expect("a structural change has a grid edit");
+                    let tables_changed_before = changed_table_ids.len();
                     // A copy of a source sheet records its edits too, which its saved part
                     // cannot take.
                     let records_history = (source_workbook
@@ -1037,7 +1040,15 @@ impl WorkbookDraft {
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed |= outcome.names_changed;
-                    topology_changed = true;
+                    // Cells that moved without a name or a table changing changed as formula and
+                    // value edits at their old and new places would change them.
+                    if outcome.names_changed || changed_table_ids.len() != tables_changed_before {
+                        topology_changed = true;
+                    } else {
+                        cell_formulas_changed = true;
+                        number_formats_changed = true;
+                        moved_cell_sheets.insert(sheet_id);
+                    }
                     semantic_changed = true;
                 }
                 WorkbookChange::CopyRange {
@@ -1222,6 +1233,7 @@ impl WorkbookDraft {
             cell_formulas_changed_topology_only: !topology_changed,
             calculation_metadata_changed,
             number_formats_changed,
+            moved_cell_sheets: moved_cell_sheets.into_iter().collect(),
             inverse,
         })
     }

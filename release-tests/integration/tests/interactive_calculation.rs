@@ -3090,6 +3090,87 @@ fn random_static_edit_sequences_match_a_fresh_full_calculation_and_stay_incremen
 }
 
 #[test]
+fn random_static_structural_edit_sequences_match_a_fresh_full_calculation() {
+    let modes = random_edit_sequences(EditProfile::Static, 1..=8, true);
+    // Rows, columns, and ranges that move without a name or a table changing recalculate the
+    // cells they shift as formula and value edits there would.
+    assert!(
+        modes.contains_key("moved/Incremental/DirtySubset/parsed"),
+        "no incremental recalculation after a move: {modes:?}"
+    );
+}
+
+#[test]
+fn a_row_insertion_recalculates_only_the_formulas_it_moved_or_rewrote() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut changes = Vec::new();
+    for row in 1..=40 {
+        changes.push(WorkbookChange::set_cell_value(
+            sheet_id,
+            CellAddress::from_indices(row, 1).expect("address"),
+            number(f64::from(row)),
+        ));
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet_id,
+            CellAddress::from_indices(row, 2).expect("address"),
+            formula(&format!("A{row}*2")),
+        ));
+    }
+    changes.push(WorkbookChange::set_cell_formula(
+        sheet_id,
+        address("D1"),
+        formula("SUM(B1:B40)"),
+    ));
+    changes.push(WorkbookChange::set_cell_formula(
+        sheet_id,
+        address("D2"),
+        formula("A35+A5"),
+    ));
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::insert_rows(
+                sheet_id,
+                cellrune::Row::new(30).expect("row"),
+                1,
+            )
+            .expect("insertion")]),
+        )
+        .expect("row insertion");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("recalculation");
+    assert_eq!(
+        (delta.mode(), delta.reason()),
+        (
+            CalculationExecutionMode::Incremental,
+            CalculationDecisionReason::DirtySubset,
+        )
+    );
+    // B30:B40 moved to B31:B41, and D1 and D2 read moved cells; the other 29 formulas stay.
+    assert_eq!(delta.evaluated_count(), 13);
+    assert_calculations_equal(
+        session.calculation().expect("installed result"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+}
+
+#[test]
 fn random_dynamic_edit_sequences_match_a_fresh_full_calculation() {
     let modes = random_edit_sequences(EditProfile::Dynamic, 101..=108, false);
     assert!(
@@ -3158,11 +3239,14 @@ fn random_edit_sequences(
                 EditBatch::new(initial),
             )
             .expect("generated workbook");
+        // Whether rows, columns, or a range moved since the last recalculation.
+        let mut moved = false;
         for step in 0..80 {
             let mut changes = (0..=generator.random.below(3))
                 .map(|_| generator.change())
                 .collect::<Vec<_>>();
-            if structural && generator.random.below(4) == 0 {
+            let moves = structural && generator.random.below(4) == 0;
+            if moves {
                 let position = generator.random.below(changes.len() as u32 + 1) as usize;
                 changes.insert(
                     position,
@@ -3175,7 +3259,7 @@ fn random_edit_sequences(
                 session.workbook().semantic_revision(),
                 EditBatch::new(changes),
             ) {
-                Ok(_) => {}
+                Ok(_) => moved |= moves,
                 Err(ApplyChangesError::Validation(
                     cellrune::ValidationError::FormulaRewriteParseFailed { .. },
                 )) if structural => {}
@@ -3188,8 +3272,8 @@ fn random_edit_sequences(
                     session.workbook().semantic_revision(),
                     EditBatch::new([random_range_move(&mut generator.random, generator.sheets)]),
                 ) {
-                    Ok(_)
-                    | Err(ApplyChangesError::Validation(
+                    Ok(_) => moved = true,
+                    Err(ApplyChangesError::Validation(
                         cellrune::ValidationError::ArrayFormulaPartEdit { .. }
                         | cellrune::ValidationError::FormulaRewriteParseFailed { .. },
                     )) => {}
@@ -3226,8 +3310,14 @@ fn random_edit_sequences(
             } else {
                 "parsed"
             };
+            let moved = std::mem::take(&mut moved);
             *modes
-                .entry(format!("{:?}/{:?}/{parsed}", delta.mode(), delta.reason()))
+                .entry(format!(
+                    "{}{:?}/{:?}/{parsed}",
+                    if moved { "moved/" } else { "" },
+                    delta.mode(),
+                    delta.reason()
+                ))
                 .or_insert(0) += 1;
             let full = calculate_workbook(session.workbook(), CalculationOptions::default());
             let calculation = session.calculation().expect("installed calculation");

@@ -1092,6 +1092,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   formula, an edit adds a reference incremental calculation cannot follow,
   or the graph could reach `max_dependency_edges`, and reports
   `DynamicTopology` when the workbook already held such a reference.
+  Inserting, deleting, or moving rows, columns, or a range without changing
+  a defined name or a table counts as editing the cells it vacated, filled,
+  and rewrote, unless they hold more than half of the workbook's formulas,
+  which compiles the workbook again (`TopologyChanged`).
   Forced `Incremental` fails closed when
   unsafe, including after formula edits. When the only
   options that differ from the installed calculation are the `TODAY()` serial,

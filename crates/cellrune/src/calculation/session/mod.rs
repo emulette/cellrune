@@ -30,8 +30,8 @@ pub use dependencies::{CellDependents, CellPrecedents, Dependent, Precedent, Pre
 use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{
-    affected_formulas, formula_cells, formula_cells_from_workbook, number_format_formulas,
-    volatile_input_formulas,
+    affected_formulas, formula_cells, formula_cells_from_workbook, moved_cells,
+    number_format_formulas, volatile_input_formulas,
 };
 pub use limits::{CancellationToken, SessionLimits};
 pub use transaction::{
@@ -262,21 +262,53 @@ impl WorkbookCalculationSession {
             receipt.topology_changed() || receipt.calculation_metadata_changed();
         // Formula edits alone keep the compiled state, which the next automatic recalculation
         // updates for the edited cells.
-        let local_formula_edits = receipt.cell_formulas_changed_topology_only()
+        let mut local_formula_edits = receipt.cell_formulas_changed_topology_only()
             && !receipt.calculation_metadata_changed()
             && !self.requires_full_rebuild
             && self.compiled.is_some();
-        let next_requires_full_rebuild =
-            self.requires_full_rebuild || (topology_or_metadata_changed && !local_formula_edits);
-        let edited_formulas = if local_formula_edits {
+        // Cells a row, column, or range move shifted changed where they left and where they
+        // landed, as formula and value edits there would change them.
+        let calculation_changed_cells =
+            if local_formula_edits && !receipt.moved_cell_sheets().is_empty() {
+                let mut cells = receipt
+                    .calculation_changed_cells()
+                    .iter()
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                cells.extend(
+                    moved_cells(
+                        self.workbook(),
+                        draft.workbook(),
+                        receipt.moved_cell_sheets(),
+                        &cancelled,
+                    )
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?,
+                );
+                Cow::Owned(cells.into_iter().collect::<Vec<_>>())
+            } else {
+                Cow::Borrowed(receipt.calculation_changed_cells())
+            };
+        let mut edited_formulas = if local_formula_edits {
             formula_edit_cells(
                 self.workbook(),
                 draft.workbook(),
-                receipt.calculation_changed_cells(),
+                &calculation_changed_cells,
             )
         } else {
             BTreeSet::new()
         };
+        // Compiling formulas one by one costs more than compiling the workbook once they are
+        // most of it, so a move that shifted that many compiles the workbook again.
+        if !receipt.moved_cell_sheets().is_empty()
+            && self.compiled.as_ref().is_some_and(|compiled| {
+                edited_formulas.len().saturating_mul(2) > compiled.formula_count()
+            })
+        {
+            local_formula_edits = false;
+            edited_formulas.clear();
+        }
+        let next_requires_full_rebuild =
+            self.requires_full_rebuild || (topology_or_metadata_changed && !local_formula_edits);
         let replacement_dirty_state = if (!topology_or_metadata_changed || local_formula_edits)
             && let Some(compiled) = &self.compiled
         {
@@ -284,7 +316,7 @@ impl WorkbookCalculationSession {
                 draft.workbook(),
                 compiled,
                 self.calculation.as_deref(),
-                receipt.calculation_changed_cells(),
+                &calculation_changed_cells,
                 &self.dirty,
                 &cancelled,
             )
@@ -315,7 +347,7 @@ impl WorkbookCalculationSession {
                 .as_ref()
                 .is_some_and(|compiled| !compiled.number_format_formulas().is_empty());
         let next_calculation_changes_pending = self.calculation_changes_pending
-            || !receipt.calculation_changed_cells().is_empty()
+            || !calculation_changed_cells.is_empty()
             || reads_changed_formats;
         Ok(PreparedEditBatch {
             base_revision: current_revision,
