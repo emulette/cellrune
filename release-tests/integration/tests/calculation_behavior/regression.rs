@@ -140,6 +140,43 @@ fn regression_normalization_preserves_single_and_multi_variable_orientations() {
 }
 
 #[test]
+fn regression_statistics_do_not_depend_on_the_scale_of_the_response() {
+    let mut draft = WorkbookDraft::new();
+    let sheet_id = draft.workbook().sheets()[0].id();
+    for (address, formula) in [
+        ("A1", "=LINEST({1;3;2;5},{1;2;3;4},TRUE,TRUE)"),
+        ("D1", "=LINEST({1E-8;3E-8;2E-8;5E-8},{1;2;3;4},TRUE,TRUE)"),
+        ("G1", "=LINEST({1002;1004;1006;1008},{1;2;3;4},TRUE,TRUE)"),
+    ] {
+        draft
+            .set_cell_dynamic_formula(
+                sheet_id,
+                CellAddress::from_a1(address).expect("valid dynamic anchor"),
+                FormulaText::from_user_input(formula).expect("valid formula"),
+                None,
+            )
+            .expect("dynamic formula mutation");
+    }
+    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+    // Sxx = 5, Sxy = 5.5 and SST = 8.75 for the unscaled response, so R² = 6.05 / 8.75 and
+    // SE(y) = sqrt(2.7 / 2) times the response scale.
+    let r_squared = 6.05 / 8.75;
+    let standard_error = 1.35_f64.sqrt();
+    for (address, expected, tolerance) in [
+        ("A3", r_squared, 1.0e-12),
+        ("B3", standard_error, 1.0e-12),
+        ("D1", 1.1e-8, 1.0e-20),
+        ("D3", r_squared, 1.0e-12),
+        ("E3", standard_error * 1.0e-8, 1.0e-20),
+        ("G1", 2.0, 1.0e-12),
+        ("G3", 1.0, 0.0),
+        ("H3", 0.0, 0.0),
+    ] {
+        assert_materialized_approx(&calculation, sheet_id, address, expected, tolerance);
+    }
+}
+
+#[test]
 fn matrix_and_regression_workspace_limits_surface_as_engine_issues() {
     let mut matrix_draft = WorkbookDraft::new();
     let sheet_id = matrix_draft.workbook().sheets()[0].id();

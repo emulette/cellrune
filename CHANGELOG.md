@@ -15,6 +15,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `ISOWEEKNUM` and `WEEKNUM(…, 21)` number every date of a year that starts on a Friday, such as
   2021 and 2027, by ISO 8601. They were one week high: 2021-01-04 returned 2 and 2021-01-01
   returned 1 instead of 53.
+- The `LINEST` and `LOGEST` statistics scale the exact-fit test with the response. A response
+  whose total sum of squares is below about `1.4e-14`, such as values near `1e-8`, no longer has
+  its residuals dropped, so `R²` is not reported as 1 with a zero standard error.
 
 ## [0.1.27] - 2026-10-24
 

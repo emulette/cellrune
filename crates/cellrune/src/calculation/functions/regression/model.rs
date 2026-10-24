@@ -129,7 +129,10 @@ fn materialize_model(
         response_moments.sum_squares_about_zero()?
     };
     let raw_residual = residual_moments.sum_squares_about_zero()?;
-    let exact_fit_threshold = f64::EPSILON * 64.0 * total_sum_squares.max(1.0);
+    // Residuals of an exact fit keep the rounding of the responses themselves, about EPSILON² Σy²,
+    // so the floor follows the response scale instead of a fixed magnitude.
+    let rounding_floor = f64::EPSILON * response_moments.sum_squares_about_zero()?;
+    let exact_fit_threshold = f64::EPSILON * 64.0 * total_sum_squares.max(rounding_floor);
     let residual_sum_squares = if raw_residual <= exact_fit_threshold {
         0.0
     } else {
