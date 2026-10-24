@@ -10,6 +10,12 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Fixed
+
+- `ISOWEEKNUM` and `WEEKNUM(…, 21)` number every date of a year that starts on a Friday, such as
+  2021 and 2027, by ISO 8601. They were one week high: 2021-01-04 returned 2 and 2021-01-01
+  returned 1 instead of 53.
+
 ## [0.1.27] - 2026-10-24
 
 ### Added

@@ -1,3 +1,5 @@
+use crate::DateSystem;
+
 use super::super::ast::Expr;
 use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
@@ -140,21 +142,27 @@ fn iso_week_num(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         Ok(number) => number.trunc(),
         Err(kind) => return Value::Error(kind),
     };
-    let Some(date) = date_from_serial(serial, engine.date_system()) else {
-        return Value::Error(ErrorKind::Num);
-    };
-    let Some(weekday) = weekday_monday_zero(serial, engine.date_system()) else {
-        return Value::Error(ErrorKind::Num);
-    };
+    match iso_week(serial, engine.date_system()) {
+        Some(week) => Value::Number(week as f64),
+        None => Value::Error(ErrorKind::Num),
+    }
+}
+
+fn iso_week(serial: f64, system: DateSystem) -> Option<i64> {
+    let date = date_from_serial(serial, system)?;
+    let weekday = weekday_monday_zero(serial, system)?;
     let ordinal =
         days_from_civil(date.year, date.month, date.day) - days_from_civil(date.year, 1, 1) + 1;
-    let mut week = (ordinal - i64::from(weekday) + 10).div_euclid(7);
-    if week < 1 {
-        week = i64::from(iso_weeks_in_year(date.year - 1));
+    // ISO 8601 numbers a week by its Thursday: floor((ordinal - weekday + 10) / 7) with Monday = 1,
+    // which is `+ 9` for the Monday = 0 weekday used here.
+    let week = (ordinal - i64::from(weekday) + 9).div_euclid(7);
+    Some(if week < 1 {
+        i64::from(iso_weeks_in_year(date.year - 1))
     } else if week > i64::from(iso_weeks_in_year(date.year)) {
-        week = 1;
-    }
-    Value::Number(week as f64)
+        1
+    } else {
+        week
+    })
 }
 
 fn iso_weeks_in_year(year: i32) -> i32 {
@@ -211,4 +219,64 @@ fn week_num(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
     };
     let offset = (january_weekday - week_start).rem_euclid(7);
     Value::Number(((serial - year_start + f64::from(offset)) / 7.0).floor() + 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calculation::functions::calendar::unix_days_from_serial;
+
+    fn serial(year: i32, month: u32, day: u32, system: DateSystem) -> f64 {
+        serial_from_date(Date { year, month, day }, system).expect("valid test date")
+    }
+
+    #[test]
+    fn iso_week_numbers_years_that_start_on_a_friday() {
+        for (year, month, day, week) in [
+            (2021, 1, 1, 53),
+            (2021, 1, 3, 53),
+            (2021, 1, 4, 1),
+            (2021, 12, 26, 51),
+            (2021, 12, 27, 52),
+            (2021, 12, 31, 52),
+            (2026, 1, 1, 1),
+            (2026, 12, 31, 53),
+            (2027, 1, 1, 53),
+            (2027, 1, 3, 53),
+            (2027, 1, 4, 1),
+            (2027, 12, 31, 52),
+        ] {
+            for system in [DateSystem::Excel1900, DateSystem::Excel1904] {
+                assert_eq!(
+                    iso_week(serial(year, month, day, system), system),
+                    Some(week),
+                    "{year}-{month:02}-{day:02} in {system:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn iso_week_matches_the_thursday_rule_for_every_real_calendar_date() {
+        // Excel 1900 serials before 61 follow Excel's fictitious leap-year weekday sequence.
+        for (system, first_serial) in [(DateSystem::Excel1900, 61), (DateSystem::Excel1904, 0)] {
+            let mut serial = first_serial;
+            while let Some(days) = unix_days_from_serial(f64::from(serial), system) {
+                let monday_zero = (days + 3).rem_euclid(7);
+                let thursday = days + 3 - monday_zero;
+                let date = date_from_serial(f64::from(serial), system).expect("real date");
+                let week_year = (date.year - 1..=date.year + 1)
+                    .rev()
+                    .find(|year| days_from_civil(*year, 1, 1) <= thursday)
+                    .expect("the Thursday falls in a neighbouring year");
+                let expected = (thursday - days_from_civil(week_year, 1, 1)).div_euclid(7) + 1;
+                assert_eq!(
+                    iso_week(f64::from(serial), system),
+                    Some(expected),
+                    "serial {serial} in {system:?}"
+                );
+                serial += 1;
+            }
+        }
+    }
 }

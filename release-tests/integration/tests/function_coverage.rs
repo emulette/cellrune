@@ -402,6 +402,23 @@ fn second_expansion_wave_rejects_invalid_domains_and_widths() {
 }
 
 #[test]
+fn iso_week_numbers_count_weeks_from_the_first_thursday() {
+    let cases = [
+        number("ISOWEEKNUM(DATE(2021,1,1))", 53.0, 0.0),
+        number("ISOWEEKNUM(DATE(2021,1,4))", 1.0, 0.0),
+        number("ISOWEEKNUM(DATE(2021,12,31))", 52.0, 0.0),
+        number("ISOWEEKNUM(DATE(2027,1,1))", 53.0, 0.0),
+        number("WEEKNUM(DATE(2027,1,4),21)", 1.0, 0.0),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn gamma_distribution_family_matches_documented_examples() {
     let cases = [
         number("GAMMA(2.5)", 1.329_340_388_179_137, 1e-12),
