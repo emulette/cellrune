@@ -72,6 +72,7 @@ are not part of this binary notice.
 | `maybe-owned` | `0.3.4` | `MIT OR Apache-2.0` |
 | `memchr` | `2.8.3` | `Unlicense OR MIT` |
 | `miniz_oxide` | `0.8.9` | `MIT OR Zlib OR Apache-2.0` |
+| `mio` | `1.2.4` | `MIT` |
 | `nix` | `0.31.3` | `MIT` |
 | `num-traits` | `0.2.19` | `MIT OR Apache-2.0` |
 | `once_cell` | `1.21.4` | `MIT OR Apache-2.0` |
@@ -83,7 +84,7 @@ are not part of this binary notice.
 | `quick-xml` | `0.42.0` | `MIT` |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` |
 | `ref-cast` | `1.0.26` | `MIT OR Apache-2.0` |
-| `rmcp` | `3.5.1` | `Apache-2.0` |
+| `rmcp` | `3.7.0` | `Apache-2.0` |
 | `rustix` | `1.1.4` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `rustix-linux-procfs` | `0.1.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `schemars` | `1.2.1` | `MIT` |
@@ -94,6 +95,7 @@ are not part of this binary notice.
 | `sharded-slab` | `0.1.7` | `MIT` |
 | `simd-adler32` | `0.3.10` | `MIT` |
 | `slab` | `0.4.12` | `MIT` |
+| `socket2` | `0.6.5` | `MIT OR Apache-2.0` |
 | `stacker` | `0.1.25` | `MIT OR Apache-2.0` |
 | `strsim` | `0.11.1` | `MIT` |
 | `thiserror` | `2.0.19` | `MIT OR Apache-2.0` |
@@ -108,6 +110,7 @@ are not part of this binary notice.
 | `unicode-ident` | `1.0.24` | `(MIT OR Apache-2.0) AND Unicode-3.0` |
 | `utf8parse` | `0.2.2` | `Apache-2.0 OR MIT` |
 | `uuid` | `1.24.0` | `Apache-2.0 OR MIT` |
+| `wasi` | `0.11.1+wasi-snapshot-preview1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `wasm-bindgen` | `0.2.126` | `MIT OR Apache-2.0` |
 | `wasm-bindgen-shared` | `0.2.126` | `MIT OR Apache-2.0` |
 | `windows-core` | `0.62.2` | `MIT OR Apache-2.0` |
@@ -116,6 +119,7 @@ are not part of this binary notice.
 | `windows-strings` | `0.5.1` | `MIT OR Apache-2.0` |
 | `windows-sys` | `0.59.0` | `MIT OR Apache-2.0` |
 | `windows-sys` | `0.60.2` | `MIT OR Apache-2.0` |
+| `windows-sys` | `0.61.2` | `MIT OR Apache-2.0` |
 | `windows-targets` | `0.52.6` | `MIT OR Apache-2.0` |
 | `windows-targets` | `0.53.5` | `MIT OR Apache-2.0` |
 | `windows_aarch64_gnullvm` | `0.52.6` | `MIT OR Apache-2.0` |
@@ -378,8 +382,8 @@ Components: `adler2 2.0.1`, `ambient-authority 0.0.2`, `cap-primitives 4.0.3`, `
   1.0.20`, `fs-set-times 0.20.3`, `io-extras 0.19.0`, `io-lifetimes 2.0.4`, `io-lifetimes 3.0.1`,
   `itoa 1.0.18`, `linux-raw-sys 0.12.1`, `once_cell 1.21.4`, `pin-project-lite 0.2.17`, `ref-cast
   1.0.26`, `rustix 1.1.4`, `rustix-linux-procfs 0.1.1`, `serde 1.0.229`, `serde_core 1.0.229`,
-  `serde_json 1.0.151`, `thiserror 2.0.19`, `typed-path 0.12.3`, `unicode-ident 1.0.24`, `zmij
-  1.0.23`
+  `serde_json 1.0.151`, `thiserror 2.0.19`, `typed-path 0.12.3`, `unicode-ident 1.0.24`, `wasi
+  0.11.1+wasi-snapshot-preview1`, `zmij 1.0.23`
 
 Source filenames: `LICENSE-MIT`
 
@@ -453,9 +457,9 @@ Components: `ambient-authority 0.0.2`, `bitflags 2.13.1`, `cap-primitives 4.0.3`
   1.0.4`, `core-foundation-sys 0.8.7`, `equivalent 1.0.2`, `errno 0.3.14`, `flate2 1.1.9`, `fs-set-
   times 0.20.3`, `hashbrown 0.17.1`, `indexmap 2.14.0`, `io-extras 0.19.0`, `io-lifetimes 2.0.4`,
   `io-lifetimes 3.0.1`, `js-sys 0.3.103`, `lazy_static 1.5.0`, `linux-raw-sys 0.12.1`, `log 0.4.33`,
-  `num-traits 0.2.19`, `once_cell 1.21.4`, `rustix 1.1.4`, `rustix-linux-procfs 0.1.1`, `stacker
-  0.1.25`, `thread_local 1.1.10`, `uuid 1.24.0`, `wasm-bindgen 0.2.126`, `wasm-bindgen-shared
-  0.2.126`
+  `num-traits 0.2.19`, `once_cell 1.21.4`, `rustix 1.1.4`, `rustix-linux-procfs 0.1.1`, `socket2
+  0.6.5`, `stacker 0.1.25`, `thread_local 1.1.10`, `uuid 1.24.0`, `wasi 0.11.1+wasi-snapshot-
+  preview1`, `wasm-bindgen 0.2.126`, `wasm-bindgen-shared 0.2.126`
 
 Source filenames: `LICENSE-APACHE`
 
@@ -667,7 +671,7 @@ limitations under the License.
 
 Components: `ambient-authority 0.0.2`, `cap-primitives 4.0.3`, `cap-std 4.0.3`, `fs-set-times 0.20.3`, `io-
   extras 0.19.0`, `io-lifetimes 2.0.4`, `io-lifetimes 3.0.1`, `linux-raw-sys 0.12.1`, `rustix
-  1.1.4`, `rustix-linux-procfs 0.1.1`, `winx 0.36.4`
+  1.1.4`, `rustix-linux-procfs 0.1.1`, `wasi 0.11.1+wasi-snapshot-preview1`, `winx 0.36.4`
 
 Source filenames: `LICENSE`, `LICENSE-Apache-2.0_WITH_LLVM-exception`
 
@@ -1576,8 +1580,8 @@ at your option.
 
 ### License text 17
 
-Components: `cfg-if 1.0.4`, `js-sys 0.3.103`, `stacker 0.1.25`, `wasm-bindgen 0.2.126`, `wasm-bindgen-shared
-  0.2.126`
+Components: `cfg-if 1.0.4`, `js-sys 0.3.103`, `socket2 0.6.5`, `stacker 0.1.25`, `wasm-bindgen 0.2.126`, `wasm-
+  bindgen-shared 0.2.126`
 
 Source filenames: `LICENSE-MIT`
 
@@ -4638,6 +4642,34 @@ Apache License
 
 ### License text 55
 
+Components: `mio 1.2.4`
+
+Source filenames: `LICENSE`
+
+```text
+Copyright (c) 2014 Carl Lerche and other MIO contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### License text 56
+
 Components: `nix 0.31.3`
 
 Source filenames: `LICENSE`
@@ -4666,7 +4698,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 56
+### License text 57
 
 Components: `pcre2 0.2.11`, `pcre2-sys 0.2.10`
 
@@ -4696,7 +4728,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 57
+### License text 58
 
 Components: `pcre2-sys 0.2.10`
 
@@ -4740,7 +4772,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### License text 58
+### License text 59
 
 Components: `pcre2-sys 0.2.10`
 
@@ -4772,7 +4804,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING 
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### License text 59
+### License text 60
 
 Components: `psm 0.1.32`
 
@@ -4982,7 +5014,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### License text 60
+### License text 61
 
 Components: `psm 0.1.32`
 
@@ -5007,7 +5039,7 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 61
+### License text 62
 
 Components: `quick-xml 0.42.0`
 
@@ -5039,7 +5071,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 62
+### License text 63
 
 Components: `r-efi 6.0.0`
 
@@ -5249,11 +5281,11 @@ Apache License
    limitations under the License.
 ```
 
-### License text 63
+### License text 64
 
-Components: `rmcp 3.5.1`
+Components: `rmcp 3.7.0`
 
-Source filenames: `rmcp-LICENSE`
+Source filenames: `LICENSE`
 
 ```text
 The MCP project is undergoing a licensing transition from the MIT License to the Apache License, Version 2.0 ("Apache-2.0"). All new code and specification contributions to the project are licensed under Apache-2.0. Documentation contributions (excluding specifications) are licensed under CC-BY-4.0.
@@ -5474,7 +5506,7 @@ CC-BY-4.0. See https://creativecommons.org/licenses/by/4.0/legalcode for
 the full license text.
 ```
 
-### License text 64
+### License text 65
 
 Components: `rustix 1.1.4`
 
@@ -5512,7 +5544,7 @@ is licensed under:
 at your option.
 ```
 
-### License text 65
+### License text 66
 
 Components: `rustix-linux-procfs 0.1.1`
 
@@ -5550,7 +5582,7 @@ is licensed under:
 at your option.
 ```
 
-### License text 66
+### License text 67
 
 Components: `schemars 1.2.1`
 
@@ -5580,7 +5612,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 67
+### License text 68
 
 Components: `sha2 0.11.0`
 
@@ -5617,7 +5649,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 68
+### License text 69
 
 Components: `sharded-slab 0.1.7`
 
@@ -5645,7 +5677,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### License text 69
+### License text 70
 
 Components: `simd-adler32 0.3.10`
 
@@ -5675,7 +5707,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 70
+### License text 71
 
 Components: `slab 0.4.12`
 
@@ -5709,7 +5741,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 71
+### License text 72
 
 Components: `strsim 0.11.1`
 
@@ -5741,7 +5773,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 72
+### License text 73
 
 Components: `thread_local 1.1.10`
 
@@ -5775,7 +5807,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 73
+### License text 74
 
 Components: `tokio 1.53.3`, `tokio-util 0.7.19`
 
@@ -5805,7 +5837,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 74
+### License text 75
 
 Components: `tracing 0.1.44`, `tracing-core 0.1.36`, `tracing-subscriber 0.3.23`
 
@@ -5839,7 +5871,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 75
+### License text 76
 
 Components: `typenum 1.20.1`
 
@@ -5849,7 +5881,7 @@ Source filenames: `LICENSE`
 MIT OR Apache-2.0
 ```
 
-### License text 76
+### License text 77
 
 Components: `typenum 1.20.1`
 
@@ -6059,7 +6091,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### License text 77
+### License text 78
 
 Components: `typenum 1.20.1`
 
@@ -6089,7 +6121,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 78
+### License text 79
 
 Components: `unicode-ident 1.0.24`
 
@@ -6137,7 +6169,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-### License text 79
+### License text 80
 
 Components: `utf8parse 0.2.2`
 
@@ -6171,7 +6203,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 80
+### License text 81
 
 Components: `uuid 1.24.0`
 
@@ -6206,16 +6238,16 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### License text 81
+### License text 82
 
 Components: `windows-core 0.62.2`, `windows-link 0.2.1`, `windows-result 0.4.1`, `windows-strings 0.5.1`,
-  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-targets 0.52.6`, `windows-targets 0.53.5`,
-  `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`, `windows_aarch64_msvc 0.52.6`,
-  `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`, `windows_i686_gnu 0.53.1`,
-  `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`, `windows_i686_msvc 0.52.6`,
-  `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`, `windows_x86_64_gnu 0.53.1`,
-  `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`, `windows_x86_64_msvc 0.52.6`,
-  `windows_x86_64_msvc 0.53.1`
+  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-sys 0.61.2`, `windows-targets 0.52.6`,
+  `windows-targets 0.53.5`, `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`,
+  `windows_aarch64_msvc 0.52.6`, `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`,
+  `windows_i686_gnu 0.53.1`, `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`,
+  `windows_i686_msvc 0.52.6`, `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`,
+  `windows_x86_64_gnu 0.53.1`, `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`,
+  `windows_x86_64_msvc 0.52.6`, `windows_x86_64_msvc 0.53.1`
 
 Source filenames: `license-apache-2.0`
 
@@ -6423,16 +6455,16 @@ Apache License
    limitations under the License.
 ```
 
-### License text 82
+### License text 83
 
 Components: `windows-core 0.62.2`, `windows-link 0.2.1`, `windows-result 0.4.1`, `windows-strings 0.5.1`,
-  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-targets 0.52.6`, `windows-targets 0.53.5`,
-  `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`, `windows_aarch64_msvc 0.52.6`,
-  `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`, `windows_i686_gnu 0.53.1`,
-  `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`, `windows_i686_msvc 0.52.6`,
-  `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`, `windows_x86_64_gnu 0.53.1`,
-  `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`, `windows_x86_64_msvc 0.52.6`,
-  `windows_x86_64_msvc 0.53.1`
+  `windows-sys 0.59.0`, `windows-sys 0.60.2`, `windows-sys 0.61.2`, `windows-targets 0.52.6`,
+  `windows-targets 0.53.5`, `windows_aarch64_gnullvm 0.52.6`, `windows_aarch64_gnullvm 0.53.1`,
+  `windows_aarch64_msvc 0.52.6`, `windows_aarch64_msvc 0.53.1`, `windows_i686_gnu 0.52.6`,
+  `windows_i686_gnu 0.53.1`, `windows_i686_gnullvm 0.52.6`, `windows_i686_gnullvm 0.53.1`,
+  `windows_i686_msvc 0.52.6`, `windows_i686_msvc 0.53.1`, `windows_x86_64_gnu 0.52.6`,
+  `windows_x86_64_gnu 0.53.1`, `windows_x86_64_gnullvm 0.52.6`, `windows_x86_64_gnullvm 0.53.1`,
+  `windows_x86_64_msvc 0.52.6`, `windows_x86_64_msvc 0.53.1`
 
 Source filenames: `license-mit`
 
@@ -6460,7 +6492,7 @@ MIT License
     SOFTWARE
 ```
 
-### License text 83
+### License text 84
 
 Components: `zip 9.0.4`
 
@@ -6490,7 +6522,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### License text 84
+### License text 85
 
 Components: `zlib-rs 0.6.6`
 
