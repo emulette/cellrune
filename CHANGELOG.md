@@ -390,11 +390,12 @@ inventories, and measurements belong in the linked documentation rather than in 
   periods, and other undocumented edges report `calculation.unsupported_expression`.
 - `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMCOSH`, `IMSECH`, and
   `IMCSCH` return complex text like the other complex functions, `#VALUE!` for a logical inumber,
-  and `#NUM!` at the pole zero. `IMCOSH(COMPLEX(3,4))` gives Mac Excel 2021's
-  `-6.58066304055116-7.58155274274655i`; Excel Online writes the correctly rounded `...654i`,
-  which f64 `sinh` and `sin` miss by one ULP. `IMTAN` and `IMCOT` keep their digits near a real pole, and a bounded result past
-  an overflow is its limit once the rest underflows (`IMTAN("1+400i")` is `i`); before that it
-  reports `calculation.unsupported_expression`.
+  and `#NUM!` at the pole zero. Their digits are the same on every platform:
+  `IMCOSH(COMPLEX(3,4))` is the correctly rounded `-6.58066304055116-7.58155274274654i` that
+  Excel Online writes, where Mac Excel 2021 writes `...655i`. `IMTAN` and `IMCOT` keep their
+  digits near a real pole, and a bounded result past an overflow is its limit once the rest
+  underflows (`IMTAN("1+400i")` is `i`); before that it reports
+  `calculation.unsupported_expression`.
 - `ENCODEURL` keeps ASCII letters, digits, and `.` and encodes `:`, `/`, and the space, as
   Microsoft documents; text with other characters reports `calculation.unsupported_expression`.
   Authored `ENCODEURL` formulas are stored as `_xlfn.ENCODEURL`.
@@ -568,11 +569,6 @@ inventories, and measurements belong in the linked documentation rather than in 
 - A cell written where no other style applies takes the number format of the default style. In a
   workbook whose default style declares General as a custom format, as LibreOffice saves it,
   saving an edit no longer fails output verification on the new cell.
-- `IMSIN`, `IMCOS`, `IMTAN`, `IMCOT`, `IMSEC`, `IMCSC`, `IMSINH`, `IMCOSH`, `IMSECH`, and `IMCSCH`
-  return the same digits on every platform. Their circular and hyperbolic parts came from the
-  platform's math library, so `IMCOSH(COMPLEX(3,4))` showed `-6.58066304055116-7.58155274274655i`
-  on macOS and `-7.58155274274654i`, the correctly rounded value Excel for the web shows, on Linux
-  and Windows.
 - A custom number format whose code is `General`, as Numbers declares the built-in format 0,
   reads as General instead of a date format, and saving an edit of a workbook Numbers exported no
   longer fails with `xlsx.write.output_verification_failed`.
