@@ -21,6 +21,10 @@ pub(crate) struct NewCellStyles {
     rows: BTreeMap<Row, usize>,
     columns: Vec<(Column, Column, usize)>,
     number_formats: BTreeMap<usize, NumberFormat>,
+    /// The number format of the default style when it is not General, which a cell written
+    /// where no other style applies receives. LibreOffice and Numbers declare General as a custom
+    /// format of the default style.
+    default_number_format: Option<NumberFormat>,
 }
 
 impl NewCellStyles {
@@ -83,6 +87,16 @@ impl NewCellStyles {
     ) {
         self.columns.push((first, last, index));
         self.insert_number_format(index, number_format);
+    }
+
+    /// Records the number format of the default style, `cellXfs` index 0.
+    pub(crate) fn set_default_number_format(&mut self, number_format: &NumberFormat) {
+        self.default_number_format = (number_format.id() != 0).then(|| number_format.clone());
+    }
+
+    /// Returns the number format a cell written where no other style applies receives.
+    pub(crate) fn default_number_format(&self) -> NumberFormat {
+        self.default_number_format.clone().unwrap_or_default()
     }
 
     /// Returns the source style index and number format that a cell written at the empty

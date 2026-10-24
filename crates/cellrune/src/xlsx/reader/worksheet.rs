@@ -170,6 +170,13 @@ pub(super) fn parse(
         hyperlinks,
     } = output;
     let sheet_id = sheet.id();
+    if capture != PresentationCapture::None
+        && let Some((_, number_format)) = source_style(None, resources.styles)
+    {
+        sheet
+            .new_cell_styles_mut()
+            .set_default_number_format(number_format);
+    }
     let mut xml = reader(bytes, limits);
     let mut buffer = Vec::new();
     let mut budget = XmlBudget::new(limits, source.source_id(), XlsxErrorCode::InvalidWorksheet);

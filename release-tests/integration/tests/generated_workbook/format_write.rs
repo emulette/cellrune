@@ -464,11 +464,66 @@ fn clearing_the_width_of_a_styled_column_keeps_a_standard_width() {
     }
 }
 
-/// Numbers writes `<numFmt numFmtId="0" formatCode="General"/>`, redeclaring the built-in General.
+/// Numbers writes `<numFmt numFmtId="0" formatCode="General"/>`, redeclaring the built-in General,
+/// and LibreOffice declares General as the custom format 164 of the default style.
 #[test]
 fn a_general_format_declared_as_custom_reads_as_general_and_saves_edits() {
-    let styles = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="0" formatCode="General"/></numFmts><fonts count="1"><font><sz val="10"/><name val="Helvetica Neue"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" applyNumberFormat="0"/></cellXfs></styleSheet>"#;
-    let bytes = generated_package(&[
+    for styles in [NUMBERS_GENERAL_STYLES, LIBREOFFICE_GENERAL_STYLES] {
+        let bytes = general_style_workbook(styles);
+        let document = open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("open");
+        let sheet_id = document.workbook().sheets()[0].id();
+        let a1 = document.workbook().sheets()[0]
+            .cell(address("A1"))
+            .expect("A1");
+        assert_eq!(a1.number_format().kind(), NumberFormatKind::General);
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .set_cell_value(
+                sheet_id,
+                address("B1"),
+                CellValue::number(9.0).expect("number"),
+            )
+            .expect("edit");
+        // A new cell takes the default style's format, which the saved cell reopens with.
+        let written = draft.workbook().sheets()[0]
+            .cell(address("B1"))
+            .expect("B1")
+            .number_format()
+            .clone();
+        let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
+        for output in [
+            write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
+                .expect("an edit of the sheet saves")
+                .bytes()
+                .to_vec(),
+            write_xlsx_draft_edits_bytes(&draft, WriteOptions::default())
+                .expect("an edit of the sheet saves without calculating")
+                .bytes()
+                .to_vec(),
+        ] {
+            let reopened =
+                open_xlsx_document_bytes(&output, OpenOptions::default()).expect("reopen");
+            let format = reopened.workbook().sheets()[0]
+                .cell(address("B1"))
+                .expect("B1")
+                .number_format()
+                .clone();
+            // A built-in format is its ID; a custom one is also its code.
+            assert_eq!((format.id(), format.kind()), (written.id(), written.kind()));
+            if written.id() >= 164 {
+                assert_eq!(format.code(), written.code());
+            }
+        }
+    }
+}
+
+const NUMBERS_GENERAL_STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="0" formatCode="General"/></numFmts><fonts count="1"><font><sz val="10"/><name val="Helvetica Neue"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" applyNumberFormat="0"/></cellXfs></styleSheet>"#;
+
+const LIBREOFFICE_GENERAL_STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="General"/></numFmts><fonts count="1"><font><sz val="10"/><name val="Helvetica Neue"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="false"/></cellXfs></styleSheet>"#;
+
+/// A one-sheet workbook with `styles` whose `A1` holds 3 in the default style.
+fn general_style_workbook(styles: &str) -> Vec<u8> {
+    generated_package(&[
         (
             "[Content_Types].xml",
             r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>"#,
@@ -490,30 +545,5 @@ fn a_general_format_declared_as_custom_reads_as_general_and_saves_edits() {
             "xl/worksheets/sheet1.xml",
             r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="0"><v>3</v></c></row></sheetData></worksheet>"#,
         ),
-    ]);
-    let document = open_xlsx_document_bytes(&bytes, OpenOptions::default()).expect("open");
-    let sheet_id = document.workbook().sheets()[0].id();
-    let a1 = document.workbook().sheets()[0]
-        .cell(address("A1"))
-        .expect("A1");
-    assert_eq!(a1.number_format().kind(), NumberFormatKind::General);
-    let mut draft = WorkbookDraft::from_document(&document);
-    draft
-        .set_cell_value(
-            sheet_id,
-            address("B1"),
-            CellValue::number(9.0).expect("number"),
-        )
-        .expect("edit");
-    let calculation = calculate_workbook(draft.workbook(), CalculationOptions::default());
-    let output = write_xlsx_draft_bytes(&draft, &calculation, RecalculationWriteOptions::default())
-        .expect("an edit of the sheet saves");
-    let reopened =
-        open_xlsx_document_bytes(output.bytes(), OpenOptions::default()).expect("reopen");
-    assert_eq!(
-        reopened.workbook().sheets()[0]
-            .cell(address("B1"))
-            .map(|cell| cell.number_format().kind()),
-        Some(NumberFormatKind::General)
-    );
+    ])
 }

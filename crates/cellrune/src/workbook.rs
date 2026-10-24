@@ -758,11 +758,10 @@ impl Sheet {
 
     /// Returns the number format that a cell written at the empty `address` receives.
     pub(crate) fn new_cell_number_format(&self, address: CellAddress) -> NumberFormat {
-        self.new_cell_styles
-            .style(address)
-            .map_or_else(NumberFormat::default, |(_, number_format)| {
-                number_format.clone()
-            })
+        self.new_cell_styles.style(address).map_or_else(
+            || self.new_cell_styles.default_number_format(),
+            |(_, number_format)| number_format.clone(),
+        )
     }
 
     /// Returns the smallest bounding rectangle containing all sparse cells.
