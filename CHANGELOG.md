@@ -552,6 +552,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ### Fixed
 
+- Workbooks LibreOffice saves open: LibreOffice writes `aca` on every formula, `true` on
+  volatile ones, and a formula that is not an array formula now ignores it, as Excel does,
+  instead of failing the read with `xlsx.invalid_formula_metadata`.
 - A custom number format whose code is `General`, as Numbers declares the built-in format 0,
   reads as General instead of a date format, and saving an edit of a workbook Numbers exported no
   longer fails with `xlsx.write.output_verification_failed`.

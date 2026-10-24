@@ -261,6 +261,41 @@ fn accepts_excel_shared_anchors_inside_ranges_and_empty_normal_formulas() {
 }
 
 #[test]
+fn ignores_the_array_recalculation_flag_on_formulas_that_are_not_arrays() {
+    // LibreOffice 26.8 writes `aca` on every formula it saves, `true` on volatile ones, though the
+    // flag only applies to array formulas.
+    let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>4</v></c>
+      <c r="B1"><f aca="true">SUM(OFFSET(A1,0,0,1,1))</f><v>4</v></c>
+      <c r="C1"><f aca="false">A1*2</f><v>8</v></c>
+      <c r="D1"><f t="shared" ref="D1:D2" si="0" aca="true">A1+1</f><v>5</v></c>
+    </row>
+    <row r="2">
+      <c r="D2"><f t="shared" si="0" aca="true"/><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+    let snapshot = read_xlsx_bytes(&build_archive(sheet, None, false), ReadOptions::default())
+        .expect("formulas that are not arrays ignore the flag");
+    let sheet = snapshot.sheet_by_name("Sheet1").expect("fixture sheet");
+    for (address, text) in [("B1", "SUM(OFFSET(A1,0,0,1,1))"), ("C1", "A1*2")] {
+        let cell = formula(sheet, address);
+        assert_eq!(cell.text().expect("formula text").as_str(), text);
+        assert!(matches!(cell.metadata(), FormulaMetadata::Normal));
+    }
+    assert_eq!(
+        formula(sheet, "D2")
+            .text()
+            .expect("shifted follower")
+            .as_str(),
+        "A2+1"
+    );
+}
+
+#[test]
 fn rejects_invalid_formula_metadata_and_enforces_formula_budget() {
     let unknown_shared =
         CONTAINER_MATRIX.replace("<f t=\"shared\" si=\"7\"/>", "<f t=\"shared\" si=\"8\"/>");

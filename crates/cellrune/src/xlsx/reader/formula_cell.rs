@@ -119,18 +119,13 @@ impl RawFormula {
             || self.row_oriented
             || self.input_cell_1_deleted
             || self.input_cell_2_deleted;
+        // `aca` applies only to array formulas. LibreOffice writes it on every formula, `true` on
+        // volatile ones, and a formula that is not an array ignores it, as Excel does.
         let valid = match self.kind {
             FormulaKind::Normal => {
-                self.range.is_none()
-                    && self.shared_index.is_none()
-                    && !self.always_calculate_array
-                    && !has_data_table_attributes
+                self.range.is_none() && self.shared_index.is_none() && !has_data_table_attributes
             }
-            FormulaKind::Shared => {
-                self.shared_index.is_some()
-                    && !self.always_calculate_array
-                    && !has_data_table_attributes
-            }
+            FormulaKind::Shared => self.shared_index.is_some() && !has_data_table_attributes,
             FormulaKind::Array => self.shared_index.is_none() && !has_data_table_attributes,
             FormulaKind::DataTable => {
                 self.range.is_some() && self.shared_index.is_none() && !self.always_calculate_array
