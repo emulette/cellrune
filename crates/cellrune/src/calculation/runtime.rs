@@ -156,6 +156,18 @@ impl RectSpan {
         )
     }
 
+    /// The span moved to `sheet`, or `None` when it covers more than one sheet, whose members a
+    /// change of sheet order can change.
+    pub(super) fn on_sheet(&self, sheet: usize) -> Option<Self> {
+        self.sheets.is_single_sheet().then_some(Self {
+            sheets: SheetSpan {
+                sheets: sheet..=sheet,
+                explicit_range: self.sheets.explicit_range,
+            },
+            rect: Rect { sheet, ..self.rect },
+        })
+    }
+
     pub(super) fn into_rect(self) -> Result<Rect, ErrorKind> {
         if !self.sheets.is_single_sheet() {
             return Err(ErrorKind::Ref);

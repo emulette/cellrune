@@ -3345,6 +3345,164 @@ fn a_table_resize_recalculates_only_the_formulas_reading_the_table() {
 }
 
 #[test]
+fn random_sheet_order_edits_match_a_fresh_full_calculation_and_stay_incremental() {
+    // Formulas read across sheets, by name and index, by count, across a 3-D span, and through
+    // tables, while batches delete, move, copy, and add sheets among cell and table edits.
+    let names = ["Data", "Other", "New", "X", "Y"];
+    let mut incremental_order_changes = 0;
+    for seed in 1..=60_u64 {
+        let mut random = Lcg(seed);
+        let mut session = WorkbookCalculationSession::create();
+        session
+            .apply_changes(
+                0,
+                EditBatch::new([
+                    WorkbookChange::add_sheet(SheetName::new("Data").expect("sheet name")),
+                    WorkbookChange::add_sheet(SheetName::new("Other").expect("sheet name")),
+                ]),
+            )
+            .expect("sheets");
+        for step in 0..40 {
+            let sheets = session
+                .workbook()
+                .sheets()
+                .iter()
+                .map(cellrune::Sheet::id)
+                .collect::<Vec<_>>();
+            let pick = |random: &mut Lcg| sheets[random.below(sheets.len() as u32) as usize];
+            let mut changes = Vec::new();
+            for _ in 0..=random.below(3) {
+                let sheet = pick(&mut random);
+                let cell = CellAddress::from_indices(random.below(6) + 1, random.below(3) + 1)
+                    .expect("address");
+                let name = names[random.below(names.len() as u32) as usize];
+                let other = names[random.below(names.len() as u32) as usize];
+                let text = match random.below(16) {
+                    0 | 1 => {
+                        changes.push(WorkbookChange::set_cell_value(
+                            sheet,
+                            cell,
+                            number(f64::from(random.below(9))),
+                        ));
+                        continue;
+                    }
+                    2 => format!("{name}!A1+B2"),
+                    3 => format!("SHEET({name}!A1)+SHEET()"),
+                    4 => "SHEETS()+A1".to_owned(),
+                    5 => format!("SUM({name}!A1:B3)+C1"),
+                    6 => format!("SUM('{name}:{other}'!A1)"),
+                    7 => "A1*2+B1".to_owned(),
+                    8 => "SUM(T[Column1])+COUNT(U[Column2])".to_owned(),
+                    9 => {
+                        changes.push(WorkbookChange::delete_sheet(sheet));
+                        continue;
+                    }
+                    10 => {
+                        let position = random.below(sheets.len() as u32) as usize;
+                        changes.push(WorkbookChange::move_sheet(sheet, position));
+                        continue;
+                    }
+                    11 => {
+                        let position = random.below(sheets.len() as u32 + 1) as usize;
+                        changes.push(WorkbookChange::copy_sheet(sheet, position));
+                        continue;
+                    }
+                    12 => {
+                        changes.push(WorkbookChange::add_sheet(
+                            SheetName::new(name).expect("sheet name"),
+                        ));
+                        continue;
+                    }
+                    13 => {
+                        let end =
+                            CellAddress::from_indices(3 + random.below(4), 6).expect("address");
+                        changes.push(WorkbookChange::CreateTable {
+                            sheet_id: sheet,
+                            range: CellRange::new(address("E1"), end).expect("range"),
+                            name: Some(
+                                cellrune::TableName::new(["T", "U"][random.below(2) as usize])
+                                    .expect("table name"),
+                            ),
+                        });
+                        continue;
+                    }
+                    14 => {
+                        let row = cellrune::Row::new(random.below(5) + 1).expect("row");
+                        changes.push(WorkbookChange::insert_rows(sheet, row, 1).expect("rows"));
+                        continue;
+                    }
+                    _ => {
+                        let target =
+                            CellAddress::from_indices(2 + random.below(5), 5).expect("address");
+                        changes.push(WorkbookChange::set_cell_value(
+                            sheet,
+                            target,
+                            number(f64::from(random.below(9))),
+                        ));
+                        continue;
+                    }
+                };
+                changes.push(WorkbookChange::set_cell_formula(
+                    sheet,
+                    cell,
+                    formula(&text),
+                ));
+            }
+            let order_before = session
+                .workbook()
+                .sheets()
+                .iter()
+                .map(cellrune::Sheet::id)
+                .collect::<Vec<_>>();
+            // Deleting the last sheet, a name that exists, or a table name in use is refused.
+            if session
+                .apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new(changes),
+                )
+                .is_err()
+            {
+                continue;
+            }
+            // Only sheets that left or changed places move the sheets after them.
+            let order = session
+                .workbook()
+                .sheets()
+                .iter()
+                .map(cellrune::Sheet::id)
+                .zip(&order_before)
+                .any(|(after, before)| after != *before)
+                || session.workbook().sheets().len() < order_before.len();
+            let delta = session
+                .recalculate(
+                    RecalculationMode::Auto,
+                    CalculationOptions::default(),
+                    CancellationToken::new(),
+                )
+                .unwrap_or_else(|error| panic!("seed {seed}, step {step}: {error}"));
+            if order && delta.mode() == CalculationExecutionMode::Incremental {
+                incremental_order_changes += 1;
+            }
+            let full = calculate_workbook(session.workbook(), CalculationOptions::default());
+            assert_eq!(
+                session
+                    .calculation()
+                    .expect("installed calculation")
+                    .cells()
+                    .collect::<Vec<_>>(),
+                full.cells().collect::<Vec<_>>(),
+                "seed {seed}, step {step}, {:?}",
+                delta.reason(),
+            );
+        }
+    }
+    assert!(
+        incremental_order_changes > 0,
+        "no sheet order change recalculated incrementally"
+    );
+}
+
+#[test]
 fn random_dynamic_edit_sequences_match_a_fresh_full_calculation() {
     let modes = random_edit_sequences(EditProfile::Dynamic, 101..=108, false);
     assert!(

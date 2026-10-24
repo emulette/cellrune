@@ -65,6 +65,38 @@ impl DependencyGraph {
         DependencyNode::Area(id)
     }
 
+    /// Moves every cell to the sheet `sheet` maps its sheet to, dropping the cells of a sheet it
+    /// maps to `None` and keeping every area under its id.
+    pub(super) fn with_sheets(&self, sheet: &impl Fn(usize) -> Option<usize>) -> Self {
+        let node = |node: &DependencyNode| match node {
+            DependencyNode::Cell(cell) => {
+                sheet(cell.0).map(|moved| DependencyNode::Cell((moved, cell.1, cell.2)))
+            }
+            DependencyNode::Area(area) => Some(DependencyNode::Area(*area)),
+        };
+        let nodes = |nodes: &[DependencyNode]| {
+            let mut moved = nodes.iter().filter_map(node).collect::<Vec<_>>();
+            moved.sort_unstable();
+            moved
+        };
+        let areas = self
+            .areas
+            .iter()
+            .map(|members| nodes(members).into_boxed_slice())
+            .collect::<Vec<_>>();
+        Self {
+            formulas: self
+                .formulas
+                .iter()
+                .filter_map(|(formula, waits)| {
+                    Some(((sheet(formula.0)?, formula.1, formula.2), nodes(waits)))
+                })
+                .collect(),
+            area_edges: areas.iter().map(|members| members.len() as u64).sum(),
+            areas,
+        }
+    }
+
     /// Returns the number of members held by every area so far.
     pub(super) const fn area_edges(&self) -> u64 {
         self.area_edges

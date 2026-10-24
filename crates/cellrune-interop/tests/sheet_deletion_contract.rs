@@ -75,9 +75,10 @@ fn deleting_a_sheet_rebuilds_and_reports_its_removed_results_by_their_old_name()
     let delta = session
         .recalculate(RecalculationModeDto::Auto, CalculationOptionsDto::default())
         .expect("recalculate");
+    // The deletion leaves every formula of the workbook to calculate again.
     assert_eq!(
         (delta.mode.as_str(), delta.reason.as_str()),
-        ("full", "topology_changed")
+        ("full", "dirty_set_covers_workbook")
     );
     let changed = |address: &str| {
         delta

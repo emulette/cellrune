@@ -33,6 +33,7 @@ mod orchestration;
 mod pass_dependencies;
 mod recompile;
 mod reference;
+mod sheet_remap;
 pub(in crate::calculation) mod static_impact;
 mod targeted;
 
@@ -266,10 +267,12 @@ impl CompiledWorkbook {
     }
 
     /// Returns the formula cells whose formula reads a sheet by one of the `sheets` lookup keys,
-    /// or reads sheet names or the number of sheets.
+    /// or reads sheet names or the number of sheets, and with `three_d` every formula reading
+    /// across sheets.
     pub(super) fn sheet_name_readers(
         &self,
         sheets: &BTreeSet<String>,
+        three_d: bool,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Vec<CellId>, ()> {
         let mut readers = Vec::new();
@@ -277,9 +280,8 @@ impl CompiledWorkbook {
             if cancelled() {
                 return Err(());
             }
-            if super::formula_references::expression_references(parsed.root())
-                .reads_sheet_names(sheets)
-            {
+            let references = super::formula_references::expression_references(parsed.root());
+            if references.reads_sheet_names(sheets) || (three_d && references.three_d) {
                 readers.push(*cell);
             }
         }

@@ -344,7 +344,9 @@ fn snapshot_from_incremental_engine_cancellable(
         if cancelled() {
             return Err(());
         }
+        // A dirty cell of a deleted sheet held a formula that is gone with it.
         let Some(internal_id) = public_to_internal(workbook, *public_id) else {
+            removed_formulas.insert(*public_id);
             continue;
         };
         if !engine.cell_has_formula(internal_id) {

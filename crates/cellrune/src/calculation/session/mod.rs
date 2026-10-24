@@ -31,8 +31,8 @@ use error::stale_calculation_cursor_detail;
 pub use error::{SessionError, SessionErrorCode};
 use impact::{
     affected_formulas, formula_cells, formula_cells_from_workbook, moved_cells,
-    number_format_formulas, sheet_name_readers, table_readers, tables_covered_by,
-    volatile_input_formulas,
+    number_format_formulas, public_to_internal, sheet_name_readers, sheet_order_change,
+    table_readers, tables_covered_by, volatile_input_formulas,
 };
 pub use limits::{CancellationToken, SessionLimits};
 pub use transaction::{
@@ -353,11 +353,50 @@ impl WorkbookCalculationSession {
                 }
             }
         }
+        // Deleting, copying, importing, or moving sheets moves the compiled cells of every sheet
+        // after them; the formulas on the sheets it adds and those reading what it moves
+        // recompile in place, and those of the sheets it deletes leave the results.
+        let mut sheet_order = None;
+        if local_formula_edits
+            && receipt.sheet_order_changed()
+            && let Some(compiled) = &self.compiled
+        {
+            let change =
+                sheet_order_change(self.workbook(), draft.workbook(), compiled, &cancelled)
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+            match &change.readers {
+                Some(readers) => {
+                    let added =
+                        moved_cells(self.workbook(), draft.workbook(), &change.added, &cancelled)
+                            .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+                    edited_formulas.extend(formula_edit_cells(
+                        self.workbook(),
+                        draft.workbook(),
+                        &added,
+                    ));
+                    let cells = calculation_changed_cells.to_mut();
+                    cells.extend(added);
+                    cells.sort_unstable();
+                    cells.dedup();
+                    add_readers(
+                        &mut calculation_changed_cells,
+                        &mut edited_formulas,
+                        readers.clone(),
+                    );
+                    sheet_order = Some(change);
+                }
+                None => {
+                    local_formula_edits = false;
+                    edited_formulas.clear();
+                }
+            }
+        }
         // Compiling formulas one by one costs more than compiling the workbook once they are
         // most of it, so a move or a sheet change that reached that many compiles it again.
         if (!receipt.moved_cell_sheets().is_empty()
             || !receipt.sheet_names_changed().is_empty()
-            || receipt.local_table_edits())
+            || receipt.local_table_edits()
+            || receipt.sheet_order_changed())
             && self.compiled.as_ref().is_some_and(|compiled| {
                 edited_formulas.len().saturating_mul(2) > compiled.formula_count()
             })
@@ -365,11 +404,32 @@ impl WorkbookCalculationSession {
             local_formula_edits = false;
             edited_formulas.clear();
         }
+        // The compiled state follows the sheets to their new indices, without the dependencies of
+        // the formulas that recompile, unless a formula it keeps reads what the move changes.
+        let mut next_compiled = None;
+        if local_formula_edits
+            && let (Some(change), Some(compiled)) = (&sheet_order, &self.compiled)
+        {
+            let recompiled = edited_formulas
+                .iter()
+                .filter_map(|cell| public_to_internal(self.workbook(), *cell))
+                .collect::<BTreeSet<_>>();
+            match compiled
+                .with_sheets_moved(&change.indices, &recompiled, &cancelled)
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            {
+                Some(moved) => next_compiled = Some(Arc::new(moved)),
+                None => {
+                    local_formula_edits = false;
+                    edited_formulas.clear();
+                }
+            }
+        }
         let formulas_edited = !edited_formulas.is_empty();
         let next_requires_full_rebuild =
             self.requires_full_rebuild || (topology_or_metadata_changed && !local_formula_edits);
         let replacement_dirty_state = if (!topology_or_metadata_changed || local_formula_edits)
-            && let Some(compiled) = &self.compiled
+            && let Some(compiled) = next_compiled.as_ref().or(self.compiled.as_ref())
         {
             let mut dirty = affected_formulas(
                 draft.workbook(),
@@ -381,6 +441,9 @@ impl WorkbookCalculationSession {
             )
             .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
             dirty.extend(edited_formulas.iter().copied());
+            if local_formula_edits && let Some(change) = &sheet_order {
+                dirty.extend(change.removed.iter().copied());
+            }
             if receipt.number_formats_changed() {
                 let readers = number_format_formulas(draft.workbook(), compiled, &cancelled)
                     .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
@@ -419,6 +482,7 @@ impl WorkbookCalculationSession {
             next_formula_edits,
             next_requires_full_rebuild,
             next_calculation_changes_pending,
+            next_compiled,
         })
     }
 
@@ -469,6 +533,9 @@ impl WorkbookCalculationSession {
             .into());
         }
         self.requires_full_rebuild = prepared.next_requires_full_rebuild;
+        if let Some(compiled) = prepared.next_compiled {
+            self.compiled = Some(compiled);
+        }
         self.dirty = prepared.replacement_dirty_state;
         self.formula_edits = prepared.next_formula_edits;
         self.calculation_changes_pending = prepared.next_calculation_changes_pending;
@@ -863,6 +930,8 @@ pub struct PreparedEditBatch {
     next_formula_edits: BTreeSet<CalculationCellId>,
     next_requires_full_rebuild: bool,
     next_calculation_changes_pending: bool,
+    /// The compiled state moved to the sheet order the batch leaves, when it moved sheets.
+    next_compiled: Option<Arc<CompiledWorkbook>>,
 }
 
 impl PreparedEditBatch {

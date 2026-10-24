@@ -1083,8 +1083,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   construction.
 - `session.recalculate(RecalculationMode::Auto, options, token)` returns a
   `CalculationDelta`. `Auto` uses a proven dirty subset and falls back to
-  full calculation for defined-name edits, sheet deletion, reordering, copy,
-  or import, options, or uncertain dynamic/spill topology. After edits that only add, replace, or remove cell formulas,
+  full calculation for defined-name edits, options, or uncertain
+  dynamic/spill topology. After edits that only add, replace, or remove cell formulas,
   `Auto` parses just those formulas, updates the dependency graph in place,
   and evaluates them and their dependents (`DirtySubset`, with the parsed
   count in `.parsed_formula_count()`); it compiles the workbook again
@@ -1098,7 +1098,13 @@ than guessing a name from a different XLSX crate (`calamine`,
   name or a table, counts as editing the formulas it rewrote, the formulas
   naming the added or either renamed name, and those calling `SHEET`,
   `SHEETS`, or `CELL`; a table edit that changes no defined name counts as
-  editing the formulas reading the table, naming it, or standing in its range.
+  editing the formulas reading the table, naming it, or standing in its range;
+  deleting, moving, copying, or importing a sheet without changing a defined
+  name moves the compiled formulas with their sheets and counts as editing
+  the formulas on the sheets it adds, those naming a sheet it adds, deletes,
+  or moves or calling `SHEET`, `SHEETS`, or `CELL`, those reading across
+  sheets, and those reading a table on a moved sheet; a 3-D reference kept
+  outside those, or an array formula on a deleted sheet, compiles again.
   Each compiles the workbook again (`TopologyChanged`) when those formulas are
   more than half of the workbook's or a defined name reads the sheet or table
   names.

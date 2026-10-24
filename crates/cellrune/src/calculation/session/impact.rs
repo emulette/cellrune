@@ -193,7 +193,10 @@ fn reader_impact<'a>(
     Ok(AffectedFormulaImpact { direct, transitive })
 }
 
-fn public_to_internal(workbook: &WorkbookSnapshot, cell: CalculationCellId) -> Option<CellId> {
+pub(super) fn public_to_internal(
+    workbook: &WorkbookSnapshot,
+    cell: CalculationCellId,
+) -> Option<CellId> {
     let sheet = workbook.sheet_position(cell.sheet_id())?;
     Some((
         sheet,
@@ -318,7 +321,7 @@ pub(super) fn sheet_name_readers(
     }
     Ok(Some(
         compiled
-            .sheet_name_readers(&keys, cancelled)?
+            .sheet_name_readers(&keys, false, cancelled)?
             .into_iter()
             .filter_map(|cell| internal_to_public(workbook, cell))
             .collect(),
@@ -398,4 +401,87 @@ pub(super) fn tables_covered_by(
         .table_readers(tables, &BTreeSet::new(), cancelled)?
         .into_iter()
         .all(|cell| internal_to_public(workbook, cell).is_some_and(|cell| edits.contains(&cell))))
+}
+
+/// What deleting, copying, importing, or moving sheets between `before` and `after` changes for
+/// the compiled formulas.
+pub(super) struct SheetOrderChange {
+    /// The index in `after` of each sheet of `before`, `None` for a deleted one.
+    pub(super) indices: Vec<Option<usize>>,
+    /// The sheets of `after` that `before` does not hold.
+    pub(super) added: Vec<SheetId>,
+    /// The formulas whose results the change can alter without rewriting them: those naming a
+    /// sheet it adds, deletes, or moves, reading sheet names or the number of sheets, reading
+    /// across sheets, or reading a table on a moved sheet. `None` when a defined name reads the
+    /// sheet names or a table name, which changes every formula using it.
+    pub(super) readers: Option<BTreeSet<CalculationCellId>>,
+    /// The formulas of the deleted sheets.
+    pub(super) removed: BTreeSet<CalculationCellId>,
+}
+
+pub(super) fn sheet_order_change(
+    before: &WorkbookSnapshot,
+    after: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    cancelled: &impl Fn() -> bool,
+) -> Result<SheetOrderChange, ()> {
+    let indices = before
+        .sheets()
+        .iter()
+        .map(|sheet| after.sheet_position(sheet.id()))
+        .collect::<Vec<_>>();
+    let added = after
+        .sheets()
+        .iter()
+        .filter(|sheet| before.sheet_by_id(sheet.id()).is_none())
+        .map(crate::Sheet::id)
+        .collect::<Vec<_>>();
+    let mut names = Vec::new();
+    let mut moved_tables = Vec::new();
+    for (index, sheet) in before.sheets().iter().enumerate() {
+        if indices[index] != Some(index) {
+            names.push(sheet.name().clone());
+            if indices[index].is_some() {
+                moved_tables.extend(sheet.tables().iter().map(crate::Table::id));
+            }
+        }
+    }
+    names.extend(
+        after
+            .sheets()
+            .iter()
+            .filter(|sheet| added.contains(&sheet.id()))
+            .map(|sheet| sheet.name().clone()),
+    );
+    let removed = compiled
+        .formula_cells()
+        .filter(|cell| indices.get(cell.0).copied().flatten().is_none())
+        .filter_map(|cell| internal_to_public(before, cell))
+        .collect();
+    let keys = names
+        .iter()
+        .map(|name| name.lookup_key().to_owned())
+        .collect::<BTreeSet<_>>();
+    let readers = match (
+        sheet_name_readers(before, compiled, &names, cancelled)?,
+        table_readers(before, after, compiled, &moved_tables, cancelled)?,
+    ) {
+        (Some(mut readers), Some(tables)) => {
+            readers.extend(tables);
+            readers.extend(
+                compiled
+                    .sheet_name_readers(&keys, true, cancelled)?
+                    .into_iter()
+                    .filter_map(|cell| internal_to_public(before, cell)),
+            );
+            Some(readers)
+        }
+        _ => None,
+    };
+    Ok(SheetOrderChange {
+        indices,
+        added,
+        readers,
+        removed,
+    })
 }

@@ -1114,7 +1114,8 @@ fn sheet_deletion_is_a_stdio_change_that_names_its_removed_results() {
         "workbook_recalculate",
         json!({"session_id": session_id, "mode": "auto"}),
     ));
-    assert_eq!(delta["reason"], "topology_changed");
+    // The deletion leaves every formula of the workbook to calculate again.
+    assert_eq!(delta["reason"], "dirty_set_covers_workbook");
     assert_eq!(
         delta["removed_materialized_cells"],
         json!([{"sheet_id": 2, "sheet_name": "Data", "address": "B1"}])

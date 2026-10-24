@@ -28,6 +28,9 @@ pub struct EditReceipt {
     /// Whether the tables in `changed_table_ids` changed by table edits that changed no defined
     /// name, which change only the formulas reading those tables.
     pub(super) local_table_edits: bool,
+    /// Whether a sheet was deleted, copied, imported, or moved without a defined name changing,
+    /// which moves the sheets after it.
+    pub(super) sheet_order_changed: bool,
     pub(super) inverse: Option<Box<EditInverse>>,
 }
 
@@ -65,6 +68,7 @@ impl EditReceipt {
             moved_cell_sheets: clone_copy_slice(&self.moved_cell_sheets, cancelled)?,
             sheet_names_changed: self.sheet_names_changed.clone(),
             local_table_edits: self.local_table_edits,
+            sheet_order_changed: self.sheet_order_changed,
             inverse: self.inverse.clone(),
         })
     }
@@ -139,6 +143,13 @@ impl EditReceipt {
     /// read differently.
     pub(crate) const fn local_table_edits(&self) -> bool {
         self.local_table_edits
+    }
+
+    /// Returns whether sheets were deleted, copied, imported, or moved as
+    /// [`Self::cell_formulas_changed_topology_only`] counts them: the sheets before and after the
+    /// batch tell which moved.
+    pub(crate) const fn sheet_order_changed(&self) -> bool {
+        self.sheet_order_changed
     }
 
     pub(crate) const fn number_formats_changed(&self) -> bool {

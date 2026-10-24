@@ -96,6 +96,7 @@ impl WorkbookDraft {
                 moved_cell_sheets: Vec::new(),
                 sheet_names_changed: Vec::new(),
                 local_table_edits: false,
+                sheet_order_changed: false,
                 inverse: None,
             });
         }
@@ -145,6 +146,7 @@ impl WorkbookDraft {
         let mut moved_cell_sheets = BTreeSet::new();
         let mut sheet_names_changed = Vec::new();
         let mut local_table_edits = false;
+        let mut sheet_order_changed = false;
         let mut semantic_changed = false;
         // Every ID the workbook or this batch has used stays taken, including those of sheets
         // deleted since, so an added sheet takes the one after the highest.
@@ -160,8 +162,10 @@ impl WorkbookDraft {
         for change in batch.changes() {
             // A table edit that changes no defined name changes, for calculation, only the
             // formulas reading the table, which a session recompiles in place.
-            let names_before = is_table_change(change).then(|| defined_names.clone());
+            let names_before = (is_table_change(change) || is_sheet_order_change(change))
+                .then(|| defined_names.clone());
             let mut table_edited = false;
+            let mut sheet_order_edited = false;
             match change {
                 WorkbookChange::SetCellValue {
                     sheet_id,
@@ -529,7 +533,7 @@ impl WorkbookDraft {
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed = true;
-                    topology_changed = true;
+                    sheet_order_edited = true;
                     semantic_changed = true;
                 }
                 WorkbookChange::CopySheet { sheet_id, position } => {
@@ -593,7 +597,7 @@ impl WorkbookDraft {
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed = true;
-                    topology_changed = true;
+                    sheet_order_edited = true;
                     semantic_changed = true;
                 }
                 WorkbookChange::ImportSheet { sheet, position } => {
@@ -626,7 +630,7 @@ impl WorkbookDraft {
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed = true;
-                    topology_changed = true;
+                    sheet_order_edited = true;
                     semantic_changed = true;
                 }
                 WorkbookChange::MoveSheet { sheet_id, position } => {
@@ -662,7 +666,7 @@ impl WorkbookDraft {
                     table_formula_locations =
                         super::formula_edit::table_formula_locations(&sheets, rewrite_budget)?;
                     workbook_changed = true;
-                    topology_changed = true;
+                    sheet_order_edited = true;
                     semantic_changed = true;
                 }
                 WorkbookChange::SetSheetVisibility {
@@ -1177,11 +1181,24 @@ impl WorkbookDraft {
                     }
                 }
             }
+            let names_changed = names_before.is_some_and(|before| before != defined_names);
             if table_edited {
-                if names_before.is_some_and(|before| before != defined_names) {
+                if names_changed {
                     topology_changed = true;
                 } else {
                     cell_formulas_changed = true;
+                    local_table_edits = true;
+                }
+            }
+            // A sheet deleted, copied, imported, or moved without a defined name changing changes,
+            // for calculation, the formulas on the sheets it adds and those reading the sheets it
+            // moves, which a session recompiles in place; the tables it adds are table edits.
+            if sheet_order_edited {
+                if names_changed {
+                    topology_changed = true;
+                } else {
+                    cell_formulas_changed = true;
+                    sheet_order_changed = true;
                     local_table_edits = true;
                 }
             }
@@ -1272,6 +1289,7 @@ impl WorkbookDraft {
             moved_cell_sheets: moved_cell_sheets.into_iter().collect(),
             sheet_names_changed,
             local_table_edits,
+            sheet_order_changed,
             inverse,
         })
     }
@@ -1340,6 +1358,17 @@ fn table_range(sheets: &[Sheet], table_id: TableId) -> Option<CellRange> {
         .flat_map(Sheet::tables)
         .find(|table| table.id() == table_id)
         .map(Table::range)
+}
+
+/// Whether `change` deletes, copies, imports, or moves a sheet, which moves the sheets after it.
+fn is_sheet_order_change(change: &WorkbookChange) -> bool {
+    matches!(
+        change,
+        WorkbookChange::DeleteSheet { .. }
+            | WorkbookChange::CopySheet { .. }
+            | WorkbookChange::ImportSheet { .. }
+            | WorkbookChange::MoveSheet { .. }
+    )
 }
 
 /// Whether `change` edits a table's name, columns, or range.

@@ -187,6 +187,46 @@ impl AreaNodes {
         });
     }
 
+    /// Moves every range and block to the sheet `sheet` maps its sheet to, forgetting those of a
+    /// sheet it maps to `None`.
+    pub(super) fn with_sheets(&self, sheet: &impl Fn(usize) -> Option<usize>) -> Self {
+        let node = |node: &Option<DependencyNode>| match node {
+            Some(DependencyNode::Cell(cell)) => {
+                sheet(cell.0).map(|moved| Some(DependencyNode::Cell((moved, cell.1, cell.2))))
+            }
+            Some(DependencyNode::Area(area)) => Some(Some(DependencyNode::Area(*area))),
+            None => Some(None),
+        };
+        Self {
+            ranges: self
+                .ranges
+                .iter()
+                .filter_map(
+                    |(&(range_sheet, row_start, col_start, row_end, col_end), area)| {
+                        Some((
+                            (sheet(range_sheet)?, row_start, col_start, row_end, col_end),
+                            node(area)?,
+                        ))
+                    },
+                )
+                .collect(),
+            blocks: self
+                .blocks
+                .iter()
+                .filter_map(|(block, area)| {
+                    let moved = Block {
+                        band: Band {
+                            sheet: sheet(block.band.sheet)?,
+                            ..block.band
+                        },
+                        ..*block
+                    };
+                    Some((moved, node(area)?))
+                })
+                .collect(),
+        }
+    }
+
     /// Follows [`DependencyGraph::retain_referenced_areas`]: forgets the ranges and blocks whose
     /// area it dropped, so later ranges build them again, and renumbers the rest.
     pub(super) fn renumber(&mut self, renumbered: &[Option<AreaId>]) {

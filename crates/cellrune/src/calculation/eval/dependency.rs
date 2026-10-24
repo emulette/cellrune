@@ -108,6 +108,21 @@ pub(in crate::calculation) enum DependencyTarget {
 }
 
 impl DependencyTarget {
+    /// The target moved to the sheet `sheet` maps its sheet to, or `None` when it lies on a sheet
+    /// `sheet` drops or spans sheets, whose members a change of sheet order can change.
+    pub(super) fn with_sheets(&self, sheet: &impl Fn(usize) -> Option<usize>) -> Option<Self> {
+        let cell = |cell: &super::CellId| Some((sheet(cell.0)?, cell.1, cell.2));
+        let span = |span: &RectSpan| span.on_sheet(sheet(span.sheet_bounds().0)?);
+        Some(match self {
+            Self::Cell(target) => Self::Cell(cell(target)?),
+            Self::SpillAnchor(target) => Self::SpillAnchor(cell(target)?),
+            Self::FormulaContent(target) => Self::FormulaContent(cell(target)?),
+            Self::Area(target) => Self::Area(span(target)?),
+            Self::ImpactArea(target) => Self::ImpactArea(span(target)?),
+            Self::TableIdentity(table) => Self::TableIdentity(*table),
+        })
+    }
+
     fn from_span(span: RectSpan) -> Self {
         if let Ok(rect) = span.clone().into_rect()
             && rect.is_single_cell()
