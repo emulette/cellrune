@@ -881,6 +881,68 @@ fn text_formats_sections_dates_times_fractions_and_exponents() {
 }
 
 #[test]
+fn text_fixed_and_dollar_round_and_format_as_mac_excel_16_114() {
+    let cases = [
+        text("TEXT(1.005,\"0.00\")", "1.01"),
+        text("TEXT(0.285,\"0%\")", "29%"),
+        text("TEXT(2^60,\"0\")", "1152921504606850000"),
+        text("TEXT(1E+20,\"#,##0\")", "100,000,000,000,000,000,000"),
+        text("TEXT(0,\"#\")", ""),
+        text("TEXT(1,\"0.#\")", "1."),
+        text("TEXT(-0.001,\"0.00\")", "0.00"),
+        text("TEXT(\"abc\",\"0.00\")", "abc"),
+        text("TEXT(\"abc\",\"0;0;0;\"\"x\"\"@\")", "xabc"),
+        text("TEXT(\"5\",\"0.00\")", "5.00"),
+        text("TEXT(\"50%\",\"0.00\")", "0.50"),
+        text("TEXT(\"\",\"0\")", ""),
+        text("TEXT(TRUE,\"0\")", "TRUE"),
+        text("TEXT(FALSE,\"\"\"x\"\"@\"\"y\"\"\")", "xFALSEy"),
+        text("TEXT(TRUE,\"yyyy\")", "TRUE"),
+        text("TEXT(5,\"#,##0원\")", "5원"),
+        text("TEXT(-5,\"#,##0원;-#,##0원\")", "-5원"),
+        text("FIXED(1.005,2)", "1.01"),
+        text("FIXED(-1.005,2)", "-1.01"),
+        text("FIXED(1225,-1)", "1,230"),
+        text("FIXED(2^60,0)", "1,152,921,504,606,850,000"),
+        text("DOLLAR(-1.005)", "($1.01)"),
+        error("TEXT(1234.5,\"0n\")", ExcelError::Value),
+        error("TEXT(5,\"0;0 d\")", ExcelError::Value),
+        error("TEXT(\"abc\",\"General\")", ExcelError::Value),
+        error("TEXT(TRUE,\"General\")", ExcelError::Value),
+        error("TEXT(\"abc\",\"@;0\")", ExcelError::Value),
+        error("TEXT(1E+255,\"0\")", ExcelError::Value),
+        error("FIXED(1E+190,2)", ExcelError::Value),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
+fn ieee754_formats_round_the_binary_value() {
+    let cases = [
+        text("TEXT(1.005,\"0.00\")", "1.00"),
+        text("TEXT(0.285,\"0%\")", "28%"),
+        text("TEXT(2^60,\"0\")", "1152921504606846976"),
+        text("FIXED(1.005,2)", "1.00"),
+        text("DOLLAR(1.005)", "$1.00"),
+        text("TEXT(\"abc\",\"0\")", "abc"),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754),
+    );
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
 fn fixed_rounds_and_formats_decimals_with_optional_grouping() {
     let cases = [
         text("FIXED(1234.567,1)", "1,234.6"),

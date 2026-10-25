@@ -38,9 +38,9 @@ impl Error for DisplayFormatError {}
 /// Returns the text a cell holding `value` shows with the number-format code `format_code`.
 ///
 /// Numbers follow the same engine as `TEXT`, in the given date system and with the names of the
-/// profile's regional format, without the 0.1.26 `TEXT` rules Excel does not share: `#` shows
-/// nothing for zero and a code with a decimal point shows it (`1` in `0.#` is `1.`). Text goes through the code's text section: the fourth section, or a
-/// lone section holding `@`; a code without one shows the text unchanged. Logical and error values
+/// profile's regional format, rounding the number's fifteen-significant-digit decimal as Excel
+/// shows it. Text goes through the code's text section as in `TEXT`: the fourth section, or a last
+/// section holding `@`; a code without one shows the text unchanged. Logical and error values
 /// show `TRUE`, `FALSE`, or the error, and a blank shows nothing. `General` shows a number of up to
 /// 11 characters as `TEXT` does; a longer one, which Excel rounds or writes in scientific notation,
 /// is unsupported, and so is a `*` fill, because the column width is not an input.
@@ -58,13 +58,13 @@ pub fn format_display_text(
     let context = FormatContext {
         date_system,
         locale: locale_profile.locale(),
-        drops_fill: false,
-        keeps_earlier_subset: false,
+        formula: false,
+        decimal: true,
     };
     let formatted = match value {
         CellValue::Blank => return Ok(String::new()),
         CellValue::Number(number) => format_number(number.get(), format_code, context),
-        CellValue::Text(text) => format_text(text, format_code),
+        CellValue::Text(text) => format_text(text, format_code, context),
         CellValue::Logical(true) => return Ok("TRUE".to_owned()),
         CellValue::Logical(false) => return Ok("FALSE".to_owned()),
         CellValue::Error(error) => return Ok(error.as_str().to_owned()),
@@ -119,13 +119,17 @@ mod tests {
             Err(DisplayFormatError::Unsupported)
         );
         assert_eq!(
-            display(number(1e16), "0"),
+            display(number(1e16), "0").as_deref(),
+            Ok("10000000000000000")
+        );
+        assert_eq!(
+            display(number(1e16), "0 ?/?"),
             Err(DisplayFormatError::Unsupported)
         );
     }
 
     #[test]
-    fn digit_codes_show_what_excel_shows_rather_than_the_earlier_text_rules() {
+    fn digit_codes_show_what_excel_shows() {
         for (value, format, shown) in [
             (0.0, "#", ""),
             (0.0, "#,###", ""),
@@ -163,7 +167,8 @@ mod tests {
         );
         assert_eq!(display(text(), "0;-0;0;[Blue]@!").as_deref(), Ok("abc!"));
         assert_eq!(display(text(), ";;;").as_deref(), Ok(""));
-        assert_eq!(display(text(), "0;@"), Err(DisplayFormatError::Unsupported));
+        assert_eq!(display(text(), "0;\"x\"@").as_deref(), Ok("xabc"));
+        assert_eq!(display(text(), "@;0"), Err(DisplayFormatError::Unsupported));
     }
 
     #[test]

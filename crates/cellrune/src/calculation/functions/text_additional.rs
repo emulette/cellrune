@@ -1,11 +1,12 @@
 use super::super::ast::Expr;
 use super::super::coerce::to_logical;
 use super::super::eval::{Engine, EvalContext};
+use super::super::excel_digits::{Rounding, round_to_digits};
 use super::super::limits::CalculationLimitKind;
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::TextAdditionalFunction;
-use super::util::{required_number, required_text};
+use super::util::{fifteen_digit_rules, required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -105,7 +106,7 @@ fn fixed(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
     if args.is_empty() || args.len() > 3 {
         return Value::Error(ErrorKind::Value);
     }
-    let (number, decimals) = match rounded_to_decimals(engine, context, &args[0], args.get(1), 2) {
+    let (rounded, decimals) = match rounded_to_decimals(engine, context, &args[0], args.get(1), 2) {
         Ok(rounded) => rounded,
         Err(kind) => return Value::Error(kind),
     };
@@ -116,27 +117,19 @@ fn fixed(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
             Err(kind) => return Value::Error(kind),
         },
     };
-    // FIXED rounds before it formats, so a negative number that rounds to zero shows no sign.
-    let factor = 10_f64.powi(decimals as i32);
-    let magnitude = (number.abs() * factor).round() / factor;
-    let rounded = if number < 0.0 && magnitude != 0.0 {
-        -magnitude
-    } else {
-        magnitude
-    };
     let grouping = if no_commas { "0" } else { "#,##0" };
     let format = format!("{grouping}{}", decimal_places(decimals));
     match format_number(rounded, &format, engine.format_context()) {
         Ok(text) => engine.bounded_text(text),
-        // The format engine stops at 2^53 rounded units, where Excel still shows every digit.
-        Err(ErrorKind::Num) => Value::Error(ErrorKind::Unsupported),
         Err(kind) => Value::Error(kind),
     }
 }
 
-/// Reads the number and decimals `DOLLAR` and `FIXED` share: numeric text is read as `VALUE`
-/// reads it, decimals truncate and take `default_decimals` when omitted, and negative decimals round
-/// to the left of the decimal point. Returns the number and the count of decimals to show.
+/// Reads the number and decimals `DOLLAR` and `FIXED` share and rounds the number as `ROUND` does:
+/// numeric text is read as `VALUE` reads it, decimals truncate and take `default_decimals` when
+/// omitted, and negative decimals round to the left of the decimal point. A negative number that
+/// rounds to zero therefore shows no sign (`FIXED(-0.001,2)` is `0.00`). Returns the rounded number
+/// and the count of decimals to show.
 fn rounded_to_decimals(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -152,15 +145,13 @@ fn rounded_to_decimals(
     if !(-308..=127).contains(&decimals) {
         return Err(ErrorKind::Value);
     }
-    let rounded = if decimals < 0 {
-        let scale = 10_f64.powi(-decimals);
-        (number / scale).round() * scale
-    } else {
-        number
-    };
-    if !rounded.is_finite() {
-        return Err(ErrorKind::Num);
-    }
+    let rounded = round_to_digits(
+        number,
+        decimals,
+        Rounding::Nearest,
+        fifteen_digit_rules(engine),
+    )
+    .ok_or(ErrorKind::Num)?;
     Ok((rounded, decimals.max(0) as usize))
 }
 

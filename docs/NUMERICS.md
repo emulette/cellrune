@@ -184,9 +184,14 @@ default:
   is `1.15`. The product is not snapped again: `FLOOR(0.3,0.1)` is three units of `0.1`,
   `0.30000000000000004`, which Excel also returns. A place past the fifteenth significant digit
   leaves the value unchanged (`ROUND(1,400)` is `1`).
+- `TEXT`, `FIXED`, and `DOLLAR` round the number's fifteen-significant-digit decimal, scaled
+  exactly by `%` and thousands commas, and show digits past the fifteenth as zeros:
+  `TEXT(1.005,"0.00")` and `FIXED(1.005,2)` are `1.01`, `TEXT(0.285,"0%")` is `29%`, and
+  `TEXT(2^60,"0")` is `1152921504606850000` (Mac Excel 16.114). The display text of a cell rounds
+  the same way, since it has no calculation options.
 
 Under `Ieee754` comparison is exact and rounding uses the binary quotient, so `ROUND(1.005,2)` is
-`1`.
+`1`, `TEXT(1.005,"0.00")` is `1.00`, and `TEXT(2^60,"0")` is `1152921504606846976`.
 
 ### Matching: numbers in formulas and numbers joined to text
 

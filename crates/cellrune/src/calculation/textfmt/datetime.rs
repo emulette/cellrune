@@ -82,7 +82,8 @@ pub(super) fn is_date_section(tokens: &[Token]) -> bool {
     tokens.iter().any(|token| match token {
         Token::Letters { letter, .. } => matches!(letter, 'd' | 'm' | 'y' | 'h' | 's' | 'e'),
         Token::Elapsed { .. } => true,
-        // 0.1.26 showed `A/P` beside digit placeholders as literal text.
+        // Beside digit placeholders `A/P` shows the half of the day of a number (`TEXT(1,"0 a/p")`
+        // is `1 a`, Mac Excel 16.114), which digit layouts do not support.
         Token::Meridiem(Meridiem::Letter { .. }) => !has_placeholders,
         Token::Meridiem(_) => true,
         _ => false,

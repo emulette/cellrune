@@ -1391,7 +1391,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   that truncates to zero, and `#NUM!` when the span from `min` to `max` is too
   wide for a double. Authored `RANDARRAY` formulas are stored as
   `_xlfn.RANDARRAY`.
-- `TEXT(value, format_text)` reads Excel number-format codes. Up to four
+- `TEXT(value, format_text)` reads Excel number-format codes. Text that reads
+  as a number, as `VALUE` reads it, formats as that number; other text and
+  logical values format as text, `TRUE` and `FALSE` included (`TEXT("abc","0")`
+  is `abc`, `TEXT(TRUE,"0")` is `TRUE`). Up to four
   `;`-separated sections format positive numbers, negative numbers (shown
   without their sign), zero, and text; one section formats every number and
   shows a minus sign, and an empty section shows nothing. `[<=100]`-style
@@ -1404,10 +1407,15 @@ than guessing a name from a different XLSX crate (`calamine`,
   z` in either case is shown as written and a lone `n`, `N`, `B`, or `E` is
   `#VALUE!`, as Excel 16.114 for Mac and Excel for the web show them: the zero
   section `zero` is `z1900ro` (`e` is the year), where Mac Excel 2021 shows
-  `z3333o`. The one-section digit codes 0.1.26 formatted keep showing every
-  unquoted letter as written (`TEXT(5,"0 x")` is `5 x`, `TEXT(5,"0n")` is
-  `5n`). Runs of such letters, as the weekday code `aaa`, and the era and
-  Buddhist-year codes `g` and `b` are `calculation.unsupported_expression`.
+  `z3333o`. Beside digit placeholders, runs of such letters and letters of
+  other scripts are also shown as written (`TEXT(5,"#,##0원")` is `5원`);
+  date, time, era, and weekday codes beside digits make the whole code
+  `#VALUE!` in whichever section they stand, as `n` does (`TEXT(5,"0;0 d")`,
+  `TEXT(5,"0 g")`, `TEXT(5,"0 aaa")`, `TEXT(0.5,"ss.##")`), and accented Latin
+  letters there, which Excel shows or rejects by letter, are
+  `calculation.unsupported_expression`. Elsewhere runs such as `aaa` and the
+  era and Buddhist-year codes `g` and `b` are
+  `calculation.unsupported_expression`.
   Digit layouts use `0`, `#`, and `?` (a space when empty), `.`, `,` between
   integer placeholders for grouping, trailing `,` to divide by 1,000 each, `%`,
   `_x` as one space, `*x` fills, which `TEXT` drops, literals between
@@ -1417,19 +1425,20 @@ than guessing a name from a different XLSX crate (`calamine`,
   with a whole part, a fraction that rounds to zero shows spaces as wide as
   its `?` placeholders and the slash (`TEXT(1.999,"# ?/?")` is `2    `), and a
   negative number keeps its sign before an empty whole part
-  (`TEXT(-0.25,"# ?/?")` is `- 1/4`). Digit rounding is half away from zero on
-  the double. The one-section digit codes 0.1.26 formatted keep its rules: a
-  minus sign appears only when a digit or `0` placeholder is shown, an
-  integer `0` is kept unless decimals follow (`TEXT(0,"#")` is `0`), the
-  decimal point is omitted when no decimal digit is shown (`TEXT(1,"0.#")` is
-  `1`), and 2^53 or more rounded units is `#NUM!`. Every other code follows
-  Excel as measured: the decimal point is always shown (`TEXT(1,"0.#;-0.#")`
-  is `1.`) and a zero integer part without a `0` placeholder shows nothing
-  (`TEXT(0,"#;-#")` is empty); 2^53 or more rounded units, a negative number
-  that rounds to zero without a `0` placeholder in a one-section code, and a
-  scientific layout with a zero mantissa and no `0` placeholder or with a
-  decimal point but no shown decimal digit are
-  `calculation.unsupported_expression`. `General` shows a number of up to 11
+  (`TEXT(-0.25,"# ?/?")` is `- 1/4`). Decimal and scientific layouts round
+  half away from zero the number's fifteen-significant-digit decimal, with
+  digits past the fifteenth shown as zeros (`TEXT(1.005,"0.00")` is `1.01`,
+  `TEXT(0.285,"0%")` is `29%`, `TEXT(2^60,"0")` is `1152921504606850000`);
+  under `ArithmeticSemantics::Ieee754` they round the scaled double
+  (`1.00`, `28%`, `1152921504606846976`). As Excel shows them, the decimal
+  point is always shown (`TEXT(1,"0.#")` is `1.`), a zero integer part
+  without a `0` placeholder shows nothing (`TEXT(0,"#")` is empty), and a
+  negative number shows its minus sign only when a nonzero digit shows
+  (`TEXT(-0.001,"0.00")` is `0.00`). A result longer than 255 characters and
+  more than 127 decimal placeholders are `#VALUE!` (`TEXT(1E+255,"0")`); a
+  fraction of 2^53 or more units and a scientific layout with a zero mantissa
+  and no `0` placeholder or with a decimal point but no shown decimal digit
+  are `calculation.unsupported_expression`. `General` shows a number of up to 11
   characters, minus sign included, as `&` does; a longer number, which Excel
   rounds or writes in scientific notation, and a nonzero magnitude below
   0.001 are `calculation.unsupported_expression`. Date sections read `y` and
@@ -1441,26 +1450,31 @@ than guessing a name from a different XLSX crate (`calamine`,
   value of the double to the second or to the shown fraction of a second
   (`TEXT(TIME(16,36,3)+0.5/86400,"h:mm:ss")` is `16:36:03`), with English month, weekday, and
   `AM`/`PM` names under the default locale profile. These stay
-  `calculation.unsupported_expression`: fixed fraction denominators such as `# ?/8` and any other `/` beside digits that does not
-  form a `?/?` fraction (`#%/#`; the 0.1.26 code `0/2` keeps showing `3/2`
-  for 2.5), `@` in a number section, conditional sections for a negative
+  `calculation.unsupported_expression`: fixed fraction denominators such as `# ?/8` and `0/2` and any other `/` beside digits that does not
+  form a `?/?` fraction (`#%/#`), `@` in a number section, `A/P` beside
+  digits, conditional sections for a negative
   number, a third section after a second without a condition, elapsed codes
   beside `AM/PM` or `A/P`, lowercase `am/pm`, `aaa`, `b`, and `g` codes, system
   formats such as `[$-F800]`, names under a `[$-lcid]` other than `[$-409]`
   or under the Korean profile, negative date-time values, a fraction that
   rounds to zero without a nonzero whole part or beside `#` or `0`
   placeholders, a negative fraction without a whole part, and other year,
-  day, hour, and second code lengths. A non-numeric text value is
-  `#VALUE!`.
+  day, hour, and second code lengths. Text and logical values take the fourth
+  section, or with fewer sections a last section holding `@`, which places
+  the text at each `@` (`TEXT("abc","0;""x""@")` is `xabc`); a code without
+  one shows the text unchanged, whatever conditions its number sections hold.
+  `@` in an earlier section, `General` anywhere, and a fourth section with
+  digits or a condition are `#VALUE!` for text (`TEXT("abc","@;0")`,
+  `TEXT(TRUE,"General")`).
 - `FIXED(number, [decimals], [no_commas])`, added in 0.1.27, and `DOLLAR(number,
   [decimals])` read numeric text as `VALUE` does, truncate `decimals` (default
-  2; outside -308 through 127 is `#VALUE!`), and round a negative `decimals`
-  to the left of the decimal point. `FIXED` rounds half away from zero first,
-  so a negative number that rounds to zero has no sign, and groups thousands
-  with `,` unless `no_commas` is true (`FIXED(-1234.567,-1,TRUE)` is `-1230`).
-  `DOLLAR` shows `$#,##0.00` with the absolute value and wraps a negative
-  number in parentheses. A `FIXED` result of 2^53 or more rounded units is
-  `calculation.unsupported_expression`.
+  2; outside -308 through 127 is `#VALUE!`), and round as `ROUND` does, to
+  the left of the decimal point for a negative `decimals`, so `FIXED(1.005,2)`
+  is `1.01` and a negative number that rounds to zero has no sign. `FIXED`
+  groups thousands with `,` unless `no_commas` is true
+  (`FIXED(-1234.567,-1,TRUE)` is `-1230`). `DOLLAR` shows `$#,##0.00` with the
+  absolute value and wraps a negative number in parentheses. A result longer
+  than 255 characters is `#VALUE!` (`FIXED(1E+190,2)`).
 - The nine names `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`,
   `REPLACEB`, `ASC`, and `DBCS`, added in 0.1.27, follow the locale profile's
   double-byte rules. Under `Locale::EnUs` a character counts its UTF-16 code
@@ -1706,11 +1720,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   a calculation-options change, so a session recalculates fully.
 - `format_display_text(&CellValue, format_code: &str, DateSystem, LocaleProfile)
   -> Result<String, DisplayFormatError>` returns the text a cell shows. Numbers
-  go through the `TEXT` engine with the profile's names, without the 0.1.26
-  `TEXT` rules Excel does not share (`0` in `#` shows nothing, `1` in `0.#`
-  shows `1.`); text goes through the
-  code's text section (the fourth section, or a lone section holding `@`) and
-  is otherwise unchanged; logical and error values show `TRUE`, `FALSE`, or the
+  go through the `TEXT` engine with the profile's names, rounding the
+  fifteen-significant-digit decimal as Excel shows it; text goes through the
+  code's text section as in `TEXT` (the fourth section, or a last section
+  holding `@`) and is otherwise unchanged, and `General` shows it as written; logical and error values show `TRUE`, `FALSE`, or the
   error; a blank shows nothing. `General` follows `TEXT`, so a number longer
   than 11 characters is unsupported, and a `*` fill is unsupported because the
   width is not an input.

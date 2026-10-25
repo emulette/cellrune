@@ -1,18 +1,23 @@
 //! Digit layouts: decimal, scientific, and fraction.
 //!
-//! Every layout rounds half away from zero on the scaled double and pads with zeros counted by
-//! `0` placeholders. A code the 0.1.26 subset formatted also keeps that subset's rules: `#NUM!`
-//! once the rounded digits reach 2^53, a minus sign only when a digit or a `0` placeholder is
-//! shown, an integer `0` kept unless decimals follow, and the decimal point omitted when no
-//! decimal digit is shown. Other codes follow Excel, which shows nothing for a zero integer part
-//! without a `0` placeholder (`TEXT(0,"#")` is empty) and always shows the decimal point
-//! (`TEXT(1,"0.#")` is `1.`).
+//! Decimal and scientific layouts round half away from zero and pad with zeros counted by `0`
+//! placeholders. Under Excel's rules they round the number's fifteen-significant-digit decimal,
+//! so `TEXT(1.005,"0.00")` is `1.01`, `TEXT(0.285,"0%")` is `29%`, and `TEXT(2^60,"0")` is
+//! `1152921504606850000` (Mac Excel 16.114); otherwise they round the scaled binary value. As in
+//! Excel, a zero integer part without a `0` placeholder shows nothing (`TEXT(0,"#")` is empty),
+//! the decimal point always shows (`TEXT(1,"0.#")` is `1.`), and a negative number shows its
+//! minus sign only when a nonzero digit shows (`TEXT(-0.001,"0.00")` is `0.00`).
 
+use super::super::excel_digits::fifteen_significant_decimal;
 use super::super::value::ErrorKind;
-use super::lexer::{Meridiem, Placeholder, Token};
+use super::lexer::{Placeholder, Token};
 
-/// The first count of rounded units a double cannot hold exactly.
+/// The first whole part a fraction layout cannot hold exactly.
 const MAX_UNITS: f64 = 9.007_199_254_740_992e15;
+
+/// The most decimal placeholders Excel accepts: `TEXT(1,"0."&REPT("0",128))` is `#VALUE!` (Mac
+/// Excel 16.114).
+const MAX_DECIMALS: usize = 127;
 
 /// Fraction denominators are searched up to this many digits.
 const MAX_DENOMINATOR_DIGITS: usize = 4;
@@ -31,52 +36,56 @@ enum Item {
     Slash,
 }
 
-/// Renders a section whose tokens contain digit placeholders; `earlier_subset` keeps the rules of
-/// the 0.1.26 subset for a code it formatted.
+/// Renders a section whose tokens contain digit placeholders; `decimal` rounds by Excel's
+/// fifteen-digit rules.
 pub(super) fn render(
     tokens: &[Token],
     value: f64,
     signed: bool,
-    earlier_subset: bool,
+    decimal: bool,
 ) -> Result<String, ErrorKind> {
-    let items = tokens
-        .iter()
-        .map(|token| item(token, earlier_subset))
-        .collect::<Result<Vec<_>, _>>()?;
+    let items = tokens.iter().map(item).collect::<Result<Vec<_>, _>>()?;
     if items
         .iter()
         .any(|item| matches!(item, Item::Exponent { .. }))
     {
-        return render_scientific(&items, value, signed);
+        return render_scientific(&items, value, signed, decimal);
     }
     let slash = fraction_slash(&items)?;
-    // The 0.1.26 subset showed any other `/` as written, as in `0/2`. To Excel a slash before a
-    // digit is a fixed denominator, and a slash elsewhere beside digits, as in `#%/#`, is
-    // unmeasured.
-    if !earlier_subset
-        && items
-            .iter()
-            .enumerate()
-            .any(|(index, item)| *item == Item::Slash && Some(index) != slash)
+    // To Excel a slash before a digit is a fixed denominator (`TEXT(1,"0/2")` is `2/2`), and a
+    // slash elsewhere beside digits, as in `#%/#`, is unmeasured.
+    if items
+        .iter()
+        .enumerate()
+        .any(|(index, item)| *item == Item::Slash && Some(index) != slash)
     {
         return Err(ErrorKind::Unsupported);
     }
     match slash {
         Some(slash) => render_fraction(&items, slash, value, signed),
-        None => render_decimal(&items, value, signed, earlier_subset),
+        None => render_decimal(&items, value, signed, decimal),
     }
 }
 
-/// Reads a token inside a digit layout. The 0.1.26 subset showed unquoted letters and `A/P` as
-/// written; in other codes the letters Excel reads as codes are unsupported.
-fn item(token: &Token, earlier_subset: bool) -> Result<Item, ErrorKind> {
+/// How letters beside digit placeholders read, by Mac Excel 16.114: date, time, era, and weekday
+/// codes reject the whole code with `#VALUE!` (`0 d`, `0 g`, `0 bb`, `0 aaa`); other ASCII runs
+/// and letters of other scripts show as written (`0 zz`, `0원`, `0 α`); accented Latin letters
+/// are mixed (`0 ä` shows, `0 é` and `0 ñ` reject) and unsupported.
+pub(super) fn letters_beside_digits(letter: char, count: usize) -> Result<(), ErrorKind> {
+    match letter {
+        'b' | 'd' | 'e' | 'g' | 'h' | 'm' | 's' | 'y' => Err(ErrorKind::Value),
+        'a' if count >= 3 => Err(ErrorKind::Value),
+        _ if letter.is_ascii() => Ok(()),
+        '\u{c0}'..='\u{24f}' | '\u{1e00}'..='\u{1eff}' => Err(ErrorKind::Unsupported),
+        _ => Ok(()),
+    }
+}
+
+/// Reads a token inside a digit layout; the format code has already rejected the letters Excel
+/// does not show beside digits.
+fn item(token: &Token) -> Result<Item, ErrorKind> {
     Ok(match token {
-        Token::Literal(text) => Item::Literal(text.clone()),
-        Token::Letters { text, .. } if earlier_subset => Item::Literal(text.clone()),
-        Token::Invalid(letter) if earlier_subset => Item::Literal(letter.to_string()),
-        Token::Meridiem(Meridiem::Letter { morning, evening }) if earlier_subset => {
-            Item::Literal(format!("{morning}/{evening}"))
-        }
+        Token::Literal(text) | Token::Letters { text, .. } => Item::Literal(text.clone()),
         Token::Skip => Item::Literal(" ".to_owned()),
         Token::Placeholder(placeholder) => Item::Placeholder(*placeholder),
         Token::DecimalPoint => Item::DecimalPoint,
@@ -115,49 +124,98 @@ fn fraction_slash(items: &[Item]) -> Result<Option<usize>, ErrorKind> {
     Ok(found)
 }
 
-/// The digits of a rounded magnitude, split at the decimal point as 0.1.26 computed them.
+/// The digits of a rounded magnitude, split at the decimal point.
 struct Digits {
     integer: String,
     fraction: String,
+    /// Whether any digit is nonzero.
+    nonzero: bool,
 }
 
-/// Rounds `magnitude` to `decimals` places and returns the digits and the rounded unit count.
-fn rounded_digits(magnitude: f64, decimals: usize) -> Result<(Digits, u64), ErrorKind> {
-    let factor = 10_f64.powi(decimals as i32);
-    let scaled_units = (magnitude * factor).round();
-    if scaled_units >= MAX_UNITS {
-        return Err(ErrorKind::Num);
-    }
-    let units = scaled_units as u64;
-    let unit_text = units.to_string();
-    let padded = if unit_text.len() <= decimals {
-        format!(
-            "{}{}",
-            "0".repeat(decimals + 1 - unit_text.len()),
-            unit_text
-        )
+/// Rounds `magnitude` times `10^shift` half away from zero at `decimals` places. With `decimal`,
+/// the magnitude's fifteen-significant-digit decimal is rounded; otherwise the scaled binary
+/// value is.
+fn rounded_digits(
+    magnitude: f64,
+    shift: i32,
+    decimals: usize,
+    decimal: bool,
+) -> Result<Digits, ErrorKind> {
+    let units = if decimal {
+        decimal_units(magnitude, shift, decimals)
     } else {
-        unit_text
+        binary_units(magnitude, shift, decimals)?
+    };
+    let padded = if units.len() <= decimals {
+        format!("{}{units}", "0".repeat(decimals + 1 - units.len()))
+    } else {
+        units
     };
     let split = padded.len() - decimals;
-    Ok((
-        Digits {
-            integer: padded[..split].to_owned(),
-            fraction: padded[split..].to_owned(),
-        },
-        units,
-    ))
+    Ok(Digits {
+        integer: padded[..split].to_owned(),
+        fraction: padded[split..].to_owned(),
+        nonzero: padded.bytes().any(|digit| digit != b'0'),
+    })
+}
+
+/// The count of `10^-decimals` units in the fifteen-significant-digit decimal of `magnitude`
+/// times `10^shift`, rounded half away from zero; digits past the fifteenth are zeros.
+fn decimal_units(magnitude: f64, shift: i32, decimals: usize) -> String {
+    if magnitude == 0.0 {
+        return "0".to_owned();
+    }
+    let (significant, exponent) = fifteen_significant_decimal(magnitude);
+    // The first significant digit stands at `10^(exponent + shift)`.
+    let Ok(kept) = usize::try_from(
+        i64::from(exponent) + i64::from(shift) + 1 + i64::try_from(decimals).unwrap_or(i64::MAX),
+    ) else {
+        return "0".to_owned();
+    };
+    let mut units = Vec::with_capacity(kept + 1);
+    units.extend_from_slice(&significant[..kept.min(significant.len())]);
+    units.resize(kept, b'0');
+    if significant.get(kept).is_some_and(|digit| *digit >= b'5') {
+        match units.iter().rposition(|digit| *digit != b'9') {
+            Some(position) => {
+                units[position] += 1;
+                units[position + 1..].fill(b'0');
+            }
+            None => {
+                units.fill(b'0');
+                units.insert(0, b'1');
+            }
+        }
+    }
+    if units.is_empty() {
+        return "0".to_owned();
+    }
+    String::from_utf8(units).expect("ASCII digits")
+}
+
+/// The count of `10^-decimals` units in the binary `magnitude` times `10^shift`, rounded half
+/// away from zero.
+fn binary_units(magnitude: f64, shift: i32, decimals: usize) -> Result<String, ErrorKind> {
+    let scaled = if shift >= 0 {
+        magnitude * 10_f64.powi(shift)
+    } else {
+        magnitude / 10_f64.powi(-shift)
+    };
+    let units = (scaled * 10_f64.powi(decimals as i32)).round();
+    if !units.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+    Ok(format!("{units:.0}"))
 }
 
 /// Applies the integer rules: zero padding to the count of `0` placeholders and no lone `0` when
-/// every integer placeholder is optional. The 0.1.26 subset kept that `0` unless decimals
-/// followed, which `keep_lone_zero` asks for.
-fn integer_text(mut integer: String, places: &[Placeholder], keep_lone_zero: bool) -> String {
+/// every integer placeholder is optional.
+fn integer_text(mut integer: String, places: &[Placeholder]) -> String {
     let zeros = count(places, Placeholder::Zero);
     while integer.len() < zeros {
         integer.insert(0, '0');
     }
-    if integer == "0" && zeros == 0 && !keep_lone_zero {
+    if integer == "0" && zeros == 0 {
         integer.clear();
     }
     integer
@@ -238,7 +296,7 @@ fn render_decimal(
     items: &[Item],
     value: f64,
     signed: bool,
-    earlier_subset: bool,
+    decimal: bool,
 ) -> Result<String, ErrorKind> {
     let mut points = items
         .iter()
@@ -268,6 +326,9 @@ fn render_decimal(
     };
     let integer_places = places_at(&integer_positions);
     let fraction_places = places_at(&fraction_positions);
+    if fraction_places.len() > MAX_DECIMALS {
+        return Err(ErrorKind::Value);
+    }
 
     let mut grouping = false;
     let mut thousands_scale = 0;
@@ -299,32 +360,11 @@ fn render_decimal(
         return Err(ErrorKind::Unsupported);
     }
 
-    let mut scaled = value;
-    for _ in items.iter().filter(|item| **item == Item::Percent) {
-        scaled *= 100.0;
-    }
-    for _ in 0..thousands_scale {
-        scaled /= 1000.0;
-    }
-    if !scaled.is_finite() {
-        return Err(ErrorKind::Num);
-    }
-    let negative = scaled < 0.0;
-    let decimals = fraction_places.len();
-    let (digits, units) = rounded_digits(scaled.abs(), decimals)?;
-    let integer = integer_text(
-        digits.integer,
-        &integer_places,
-        earlier_subset && decimals == 0,
-    );
+    let percents = items.iter().filter(|item| **item == Item::Percent).count();
+    let shift = 2 * percents as i32 - 3 * thousands_scale;
+    let digits = rounded_digits(value.abs(), shift, fraction_places.len(), decimal)?;
+    let integer = integer_text(digits.integer, &integer_places);
     let fraction = fraction_slots(&digits.fraction, &fraction_places);
-    let point_shown = !earlier_subset || fraction.iter().any(|slot| !slot.is_empty());
-    let zero_placeholders = count(&integer_places, Placeholder::Zero);
-    // Whether Excel signs a negative number that rounds to zero without a `0` placeholder has not
-    // been measured.
-    if signed && negative && units == 0 && zero_placeholders == 0 && !earlier_subset {
-        return Err(ErrorKind::Unsupported);
-    }
     let integer_slots = if grouping {
         let mut slots = vec![String::new(); integer_places.len()];
         slots[0] = group_thousands(&integer);
@@ -334,7 +374,7 @@ fn render_decimal(
     };
 
     let mut output = String::new();
-    if signed && negative && (units > 0 || zero_placeholders > 0) {
+    if signed && value < 0.0 && digits.nonzero {
         output.push('-');
     }
     let (mut integer_slot, mut fraction_slot) = (0, 0);
@@ -348,9 +388,7 @@ fn render_decimal(
                 if integer_places.is_empty() {
                     output.push_str(&integer);
                 }
-                if point_shown {
-                    output.push('.');
-                }
+                output.push('.');
             }
             Item::Placeholder(_) if index < boundary => {
                 output.push_str(&integer_slots[integer_slot]);
@@ -365,7 +403,12 @@ fn render_decimal(
     Ok(output)
 }
 
-fn render_scientific(items: &[Item], value: f64, signed: bool) -> Result<String, ErrorKind> {
+fn render_scientific(
+    items: &[Item],
+    value: f64,
+    signed: bool,
+    decimal: bool,
+) -> Result<String, ErrorKind> {
     let exponent_index = items
         .iter()
         .position(|item| matches!(item, Item::Exponent { .. }))
@@ -431,7 +474,7 @@ fn render_scientific(items: &[Item], value: f64, signed: bool) -> Result<String,
     }
     let decimals = fraction_places.len();
     let (exponent, digits) = if magnitude == 0.0 {
-        (0, rounded_digits(0.0, decimals)?.0)
+        (0, rounded_digits(0.0, 0, decimals, decimal)?)
     } else {
         let mut exponent = magnitude.log10().floor() as i32;
         if 10_f64.powi(exponent) > magnitude {
@@ -441,11 +484,7 @@ fn render_scientific(items: &[Item], value: f64, signed: bool) -> Result<String,
         }
         exponent = exponent.div_euclid(step) * step;
         loop {
-            let mantissa = magnitude / 10_f64.powi(exponent);
-            if !mantissa.is_finite() {
-                return Err(ErrorKind::Num);
-            }
-            let (digits, _) = rounded_digits(mantissa, decimals)?;
+            let digits = rounded_digits(magnitude, -exponent, decimals, decimal)?;
             if digits.integer.len() > step as usize {
                 exponent += step;
                 continue;
@@ -458,7 +497,7 @@ fn render_scientific(items: &[Item], value: f64, signed: bool) -> Result<String,
     if magnitude == 0.0 && !integer_places.contains(&Placeholder::Zero) {
         return Err(ErrorKind::Unsupported);
     }
-    let integer = integer_text(digits.integer, &integer_places, false);
+    let integer = integer_text(digits.integer, &integer_places);
     let fraction = fraction_slots(&digits.fraction, &fraction_places).concat();
     if point.is_some() && fraction.is_empty() {
         return Err(ErrorKind::Unsupported);

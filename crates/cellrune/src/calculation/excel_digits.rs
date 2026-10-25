@@ -278,6 +278,25 @@ pub(super) fn fifteen_significant_digits(value: f64) -> f64 {
     text.as_str().parse().unwrap_or(value)
 }
 
+/// The fifteen significant digits of a nonzero finite magnitude, as ASCII, and the power of ten
+/// the first one stands at.
+pub(super) fn fifteen_significant_decimal(magnitude: f64) -> ([u8; 15], i32) {
+    let mut text = DecimalText::default();
+    write!(text, "{magnitude:.14e}").expect("a finite double fits the buffer");
+    let (mantissa, exponent) = text
+        .as_str()
+        .split_once('e')
+        .expect("scientific formatting writes an exponent");
+    let mut digits = [b'0'; EXCEL_SIGNIFICANT_DIGITS];
+    for (digit, byte) in digits
+        .iter_mut()
+        .zip(mantissa.bytes().filter(u8::is_ascii_digit))
+    {
+        *digit = byte;
+    }
+    (digits, exponent.parse().expect("formatted exponent"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,7 +5,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::{broadcast_shape, element_at};
 use super::super::runtime::{Array, Rect};
-use super::super::textfmt::format_number;
+use super::super::textfmt::{format_number, format_text};
 use super::super::value::{ErrorKind, Value};
 use super::criteria_index::indexed_matches;
 use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
@@ -279,22 +279,33 @@ fn kernel_lower(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     }
 }
 
+/// `TEXT`: text that reads as a number formats as that number, and other text and logical values
+/// format as text, `TRUE` and `FALSE` included (`TEXT("abc","0")` is `abc` and `TEXT(TRUE,"0")`
+/// is `TRUE`, Mac Excel 16.114).
 fn kernel_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let number = match to_number(
-        &engine.eval_scalar(context, &args[0]),
-        engine.numeric_text(),
-    ) {
-        Ok(number) => number,
-        Err(kind) => return Value::Error(kind),
-    };
+    let value = engine.eval_scalar(context, &args[0]);
     let format = match to_text(&engine.eval_scalar(context, &args[1])) {
         Ok(format) => format,
         Err(kind) => return Value::Error(kind),
     };
-    match format_number(number, &format, engine.format_context()) {
+    let format_context = engine.format_context();
+    let formatted = match &value {
+        Value::Text(text) => match engine.numeric_text().number(text) {
+            Some(number) => format_number(number, &format, format_context),
+            None => format_text(text, &format, format_context),
+        },
+        Value::Logical(logical) => format_text(
+            if *logical { "TRUE" } else { "FALSE" },
+            &format,
+            format_context,
+        ),
+        _ => to_number(&value, engine.numeric_text())
+            .and_then(|number| format_number(number, &format, format_context)),
+    };
+    match formatted {
         Ok(text) => engine.bounded_text(text),
         Err(kind) => Value::Error(kind),
     }

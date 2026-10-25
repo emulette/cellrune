@@ -74,6 +74,27 @@ inventories, and measurements belong in the linked documentation rather than in 
   to fifteen significant digits: `(-8)^(1/3)` is `-1.9999999999999998` instead of `#NUM!`, while
   `(-8)^(2/3)` stays `#NUM!`. `LOG` with base 1 is `#DIV/0!` instead of `#NUM!`. Either
   `ArithmeticSemantics` computes powers this way.
+- Under the default `ArithmeticSemantics::ExcelNearZero`, `TEXT`, `FIXED`, `DOLLAR`, and the
+  display text of a cell round the number's fifteen-significant-digit decimal, as Excel does:
+  `TEXT(1.005,"0.00")` and `FIXED(1.005,2)` are `1.01` and `TEXT(0.285,"0%")` is `29%` where they
+  were `1.00` and `28%`. Numbers of 2^53 or more rounded units show their fifteen significant
+  digits followed by zeros (`TEXT(2^60,"0")` is `1152921504606850000`) instead of `#NUM!` or
+  unsupported, and a result longer than 255 characters or a code with more than 127 decimal
+  placeholders is `#VALUE!`. Select `ArithmeticSemantics::Ieee754` to round the binary value as
+  before; the display text always rounds as Excel shows it.
+- `TEXT` formats every code as Excel does; the one-section digit codes 0.1.26 formatted no longer
+  keep that release's rules. `TEXT(0,"#")` is empty instead of `0`, `TEXT(1,"0.#")` is `1.`
+  instead of `1`, and a negative number that rounds to zero shows no sign (`TEXT(-0.4,"0")` is
+  `0` instead of `-0`, in display text too). `TEXT(1234.5,"0n")` and digits beside date, era, or
+  weekday codes in any section (`TEXT(5,"0;0 d")`, `"0 g"`, `"0 aaa"`) are `#VALUE!`; `TEXT(2.5,"0/2")`
+  and `A/P` beside digits are unsupported instead of `3/2` and `5 a/p`. Letters of other scripts
+  and runs of letters that are not codes beside digits show as written in every code, so
+  `TEXT(5,"#,##0원;-#,##0원")` is `5원` instead of unsupported.
+- `TEXT` formats text that does not read as a number, and logical values, with the code's text
+  section, as Excel does: `TEXT("abc","0.00")` is `abc` and `TEXT(TRUE,"0")` is `TRUE` instead of
+  `#VALUE!` and `1`. `@` in a section other than the last, `General`, and a fourth section with
+  digits or a condition are `#VALUE!` for them. Conditions in the number sections no longer make
+  the display text of a text cell unsupported, and a last section holding `@` formats it.
 
 ### Fixed
 

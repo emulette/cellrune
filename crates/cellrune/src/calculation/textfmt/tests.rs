@@ -1,12 +1,12 @@
 use super::super::value::ErrorKind;
-use super::{FormatContext, format_number};
+use super::{FormatContext, format_number, format_text};
 use crate::{DateSystem, Locale};
 
 const CONTEXT: FormatContext = FormatContext {
     date_system: DateSystem::Excel1900,
     locale: Locale::EnUs,
-    drops_fill: true,
-    keeps_earlier_subset: true,
+    formula: true,
+    decimal: true,
 };
 
 fn text(value: f64, format: &str) -> Result<String, ErrorKind> {
@@ -35,7 +35,7 @@ fn clock(hours: f64, minutes: f64, seconds: f64) -> f64 {
 }
 
 #[test]
-fn single_section_digit_codes_keep_their_earlier_results() {
+fn digit_codes_follow_mac_excel_16_114() {
     assert_text(1234.567, "$#,##0.00", "$1,234.57");
     assert_text(-5.0, "$0", "-$5");
     assert_text(12.0, "00000", "00012");
@@ -43,51 +43,121 @@ fn single_section_digit_codes_keep_their_earlier_results() {
     assert_text(0.631, "0.#", "0.6");
     assert_text(12.0, "#.0#", "12.0");
     assert_text(0.5, "#.00", ".50");
-    assert_text(0.0, "#", "0");
-    assert_text(1.0, "0.#", "1");
-    assert_text(-0.4, "0", "-0");
-    assert_text(-0.001, "#.##", "");
-    assert_text(0.285, "0.0%", "28.5%");
-    assert_text(2.5, "0/2", "3/2");
-    assert_text(5.0, "0 a/p", "5 a/p");
-    assert_eq!(text(1e16, "0"), Err(ErrorKind::Num));
-    assert_eq!(text(1e14, "#,##0.00"), Err(ErrorKind::Num));
-}
-
-#[test]
-fn codes_outside_the_earlier_subset_show_the_point_and_drop_a_lone_zero() {
-    // Excel 16.114 shows TEXT(0,"#") as "" and TEXT(1,"0.#") as "1." (excel-measure RESULTS.md,
-    // section B); those two codes keep their 0.1.26 results, every other code follows Excel.
-    assert_text(0.0, "#", "0");
-    assert_text(1.0, "0.#", "1");
+    assert_text(0.5, "#", "1");
+    assert_text(-2.5, "0", "-3");
+    assert_text(-1234.5, "#,##0", "-1,235");
+    // A zero integer part without a `0` placeholder shows nothing, and the decimal point always
+    // shows.
+    assert_text(0.0, "#", "");
+    assert_text(0.0, "#.##", ".");
+    assert_text(1.0, "0.#", "1.");
+    assert_text(1.0, "#.", "1.");
+    assert_text(0.5, "0.", "1.");
     assert_text(1.0, "0.#;-0.#", "1.");
     assert_text(-1.0, "0.#;-0.#", "-1.");
-    assert_text(1.0, "0.;-0.", "1.");
     assert_text(0.0, "#;-#", "");
     assert_text(1.0, "#,", "");
     assert_text(-0.4, "#;(#)", "()");
     assert_text(1.0, "0.#?", "1. ");
     assert_text(0.5, "#.0?", ".5 ");
-    assert_text(-0.001, "0.0?", "-0.0 ");
-    // A negative number that rounds to zero without a `0` placeholder, and scientific layouts
-    // that would need the same rules, are unmeasured.
-    assert_unsupported(-0.001, "#.#?");
+    // A negative number shows its sign only when a nonzero digit shows.
+    assert_text(-0.4, "#.#", "-.4");
+    assert_text(-0.4, "0", "0");
+    assert_text(-0.4, "#", "");
+    assert_text(-0.04, "#.#", ".");
+    assert_text(-0.001, "0.00", "0.00");
+    assert_text(-0.001, "0.00 \"x\"", "0.00 x");
+    assert_text(-0.001, "0.0?", "0.0 ");
+    assert_text(-0.001, "#.#?", ". ");
+    assert_text(-0.4, "0%", "-40%");
+    assert_text(-0.004, "0%", "0%");
+    assert_text(-1e-20, "0", "0");
+    assert_text(-0.000_4, "0.00E+00", "-4.00E-04");
+    // Scientific layouts that would need the rules of an unshown decimal point are unmeasured.
     assert_unsupported(1.0, "0.#E+0");
     assert_unsupported(0.0, "#.0E+0");
     assert_text(0.0, "0.0E+0", "0.0E+0");
 }
 
 #[test]
-fn numbers_past_the_engine_digits_are_unsupported_outside_the_earlier_subset() {
+fn digits_round_the_fifteen_digit_decimal_half_away_from_zero() {
+    assert_text(1.005, "0.00", "1.01");
+    assert_text(-1.005, "0.00", "-1.01");
+    assert_text(2.675, "0.00", "2.68");
+    assert_text(1.15, "0.0", "1.2");
+    assert_text(0.285, "0%", "29%");
+    assert_text(0.285, "0.0%", "28.5%");
+    assert_text(0.1 + 0.2, "0.00000000000000000", "0.30000000000000000");
+    assert_text(1_234_567.0, "#,##0,", "1,235");
+    assert_text(1_234_500.0, "0.0,,", "1.2");
+    assert_text(1.005, "0.00E+00", "1.01E+00");
+    assert_text(1005.0, "0.00E+0", "1.01E+3");
+    assert_text(1.005e20, "0.00E+00", "1.01E+20");
+    assert_text(12_345.0, "##0.0E+0", "12.3E+3");
+    assert_text(999.999_999_999_999_9, "0.0E+0", "1.0E+3");
+}
+
+#[test]
+fn large_numbers_show_fifteen_significant_digits_then_zeros() {
+    assert_text(1e20, "0", "100000000000000000000");
+    assert_text(1e20, "#,##0", "100,000,000,000,000,000,000");
+    assert_text(2_f64.powi(60), "0", "1152921504606850000");
+    assert_text(1e15 + 0.3, "0.0", "1000000000000000.0");
+    assert_text(
+        1.234e25,
+        "#,##0.00",
+        "12,340,000,000,000,000,000,000,000.00",
+    );
+    assert_text(
+        0.000_123_456_789_012_345,
+        "0.000000000000000000000000",
+        "0.000123456789012345000000",
+    );
+    assert_text(1e16, "0.00;(0.00)", "10000000000000000.00");
+    assert_text(-1e16, "0.00;(0.00)", "(10000000000000000.00)");
+    assert_text(1e14, "#,##0.00_)", "100,000,000,000,000.00 ");
+    assert_text(1.0, "0.0000000000000000E+0", "1.0000000000000000E+0");
+    // A fraction past 2^53 units is beyond the engine.
+    assert_unsupported(1e16, "0 ?/?");
+}
+
+#[test]
+fn results_past_255_characters_or_127_decimals_are_rejected() {
+    assert_eq!(text(1e254, "0").map(|text| text.len()), Ok(255));
+    assert_eq!(text(1e252, "0.0").map(|text| text.len()), Ok(255));
+    let decimals = |count: usize| format!("0.{}", "0".repeat(count));
+    assert_eq!(text(1.0, &decimals(127)).map(|text| text.len()), Ok(129));
     for (value, format) in [
-        (1e16, "0.00;(0.00)"),
-        (-1e16, "0.00;(0.00)"),
-        (1e16, "0.00?"),
-        (1e16, "0 ?/?"),
-        (1.0, "0.0000000000000000E+0"),
-        (1e14, "#,##0.00_)"),
+        (1e255, "0".to_owned()),
+        (1.5e300, "0".to_owned()),
+        (1e240, "#,##0".to_owned()),
+        (1e253, "0.0".to_owned()),
+        (1.0, decimals(128)),
+        (1.0, format!("0.{}", "#".repeat(128))),
     ] {
-        assert_unsupported(value, format);
+        assert_eq!(text(value, &format), Err(ErrorKind::Value), "{value:e}");
+    }
+    assert_eq!(text(1e300, "0.0E+0").as_deref(), Ok("1.0E+300"));
+}
+
+#[test]
+fn binary_rounding_rounds_the_scaled_double() {
+    let binary = FormatContext {
+        decimal: false,
+        ..CONTEXT
+    };
+    for (value, format, expected) in [
+        (1.005, "0.00", "1.00"),
+        (0.285, "0%", "28%"),
+        (2_f64.powi(60), "0", "1152921504606846976"),
+        (2.5, "0", "3"),
+        (-0.001, "0.00", "0.00"),
+    ] {
+        assert_eq!(
+            format_number(value, format, binary).as_deref(),
+            Ok(expected),
+            "{value} with {format:?}"
+        );
     }
 }
 
@@ -116,18 +186,98 @@ fn unquoted_letters_follow_excel_16_114() {
     assert_text(46_230.0, "yyyy r", "2026 r");
     assert_text(3.0, "General x", "3 x");
     assert_text(45_000.25, "yyyyy", "2023");
-    // Excel rejects n, N, B, and E as codes.
-    for format in ["n", "N", "B", "E", "0n;0", "yyyyE"] {
-        assert_eq!(text(0.0, format), Err(ErrorKind::Value), "{format}");
+    assert_text(5.0, "0 x", "5 x");
+    assert_text(5.0, "0 \"x\";0", "5 x");
+    // Mac Excel 16.114 shows runs of letters that are not codes and letters of other scripts
+    // beside digits as written.
+    assert_text(5.0, "0 zz", "5 zz");
+    assert_text(5.0, "0 aa", "5 aa");
+    assert_text(5.0, "#,##0원", "5원");
+    assert_text(5.0, "0.0 ㄱㄴ", "5.0 ㄱㄴ");
+    assert_text(5.0, "0 α", "5 α");
+    assert_text(5.0, "0;\"x\" d", "5");
+    assert_text(5.0, "\"x\" d", "x 5");
+    // Excel rejects n, N, B, and E as codes, and digits beside date, time, era, and weekday codes,
+    // in whichever section they stand.
+    for format in [
+        "n", "N", "B", "E", "0n;0", "yyyyE", "0n", "0;0n", "0 d", "d 0", "# d", "0 D", "0 e",
+        "0 g", "0 b", "0 bb", "0 aaa", "0;0 d", "ss.##", "[h] 0", "0 [h]",
+    ] {
+        assert_eq!(text(5.0, format), Err(ErrorKind::Value), "{format}");
     }
+    assert_text(0.5, "ss.000", "00.000");
+    // Accented Latin letters beside digits differ by letter (`0 ä` shows, `0 é` rejects).
+    assert_unsupported(5.0, "0 ä");
+    assert_unsupported(5.0, "0;0 é");
     // The era and Buddhist-year codes and A/P beside digits are unmeasured.
     assert_unsupported(5.0, "abc");
     assert_unsupported(0.0, "g");
     assert_unsupported(5.0, "0 a/p;0");
-    // The 0.1.26 subset showed letters as written, the rejected ones included.
-    assert_text(5.0, "0 x", "5 x");
-    assert_text(5.0, "0 \"x\";0", "5 x");
-    assert_text(1234.5, "0n", "1235n");
+    assert_unsupported(1.0, "0 a/p");
+}
+
+#[test]
+fn text_takes_the_text_section_as_in_mac_excel_16_114() {
+    let formatted = |format: &str| format_text("abc", format, CONTEXT);
+    for (format, expected) in [
+        ("0", "abc"),
+        ("0.00", "abc"),
+        ("0.00E+00", "abc"),
+        ("yyyy", "abc"),
+        ("\"lit\"", "abc"),
+        ("", "abc"),
+        ("@", "abc"),
+        ("@@", "abcabc"),
+        ("0;0;0;\"x\"@", "xabc"),
+        ("0;\"x\"@", "xabc"),
+        ("0;0;\"x\"@", "xabc"),
+        ("0;@", "abc"),
+        ("0;0;0;\"lit\"", "lit"),
+        ("0;0;0;", ""),
+        ("[<5]0", "abc"),
+        ("[>5]0;@", "abc"),
+        ("[Red]@", "abc"),
+        ("_(@_)", " abc "),
+        ("*x@", "abc"),
+        ("0원", "abc"),
+        ("0/2", "abc"),
+        ("0 a/p", "abc"),
+        ("0.0.0", "abc"),
+    ] {
+        assert_eq!(formatted(format).as_deref(), Ok(expected), "{format:?}");
+    }
+    for format in [
+        "General",
+        "0;General",
+        "General;0",
+        "0;0;0;General",
+        "General@",
+        "@;0",
+        "0;@;0",
+        "\"x\"@;0;0;0",
+        "0;0;0;0",
+        "0;0;0;[<5]@",
+        "0n",
+        "TRUE",
+        "0 d",
+        "d 0",
+        "0;0 d",
+        "0 g",
+        "0 aaa",
+        "yyyy n",
+    ] {
+        assert_eq!(formatted(format), Err(ErrorKind::Value), "{format:?}");
+    }
+    // A cell shows text in `General` and has no fill width.
+    let display = FormatContext {
+        formula: false,
+        ..CONTEXT
+    };
+    assert_eq!(format_text("abc", "General", display).as_deref(), Ok("abc"));
+    assert_eq!(
+        format_text("abc", "*x@", display),
+        Err(ErrorKind::Unsupported)
+    );
 }
 
 #[test]
@@ -175,10 +325,11 @@ fn unestablished_combinations_are_unsupported() {
     // Elapsed time beside a half-day marker.
     assert_unsupported(0.75, "[h]:mm AM/PM");
     assert_unsupported(0.75, "[mm]:ss A/P");
-    // A slash that does not form a `?/?` fraction outside the 0.1.26 subset.
+    // A slash that does not form a `?/?` fraction; to Excel `0/2` is a fixed denominator
+    // (`TEXT(1,"0/2")` is `2/2`).
     assert_unsupported(0.25, "#%/#");
     assert_unsupported(2.5, "0/2;0");
-    assert_text(2.5, "0/2", "3/2");
+    assert_unsupported(1.0, "0/2");
 }
 
 #[test]

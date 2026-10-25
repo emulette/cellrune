@@ -1509,14 +1509,17 @@ impl<'workbook> Engine<'workbook> {
         )
     }
 
-    /// The date system and regional format a number-format code reads in `TEXT`, `DOLLAR`, and
-    /// `FIXED`, which drop a `*` fill.
+    /// How `TEXT`, `DOLLAR`, and `FIXED` read a number-format code: in the workbook's date system
+    /// and regional format, rounding by the arithmetic semantics.
     pub(super) fn format_context(&self) -> super::textfmt::FormatContext {
         super::textfmt::FormatContext {
             date_system: self.date_system(),
             locale: self.options.locale_profile().locale(),
-            drops_fill: true,
-            keeps_earlier_subset: true,
+            formula: true,
+            decimal: matches!(
+                self.arithmetic_semantics(),
+                crate::ArithmeticSemantics::ExcelNearZero
+            ),
         }
     }
 

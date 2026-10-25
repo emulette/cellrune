@@ -7,13 +7,12 @@
 //! rather than a guess.
 
 mod datetime;
-mod legacy;
 mod lexer;
 mod number;
 #[cfg(test)]
 mod tests;
 
-use lexer::{RawSection, Token};
+use lexer::{Placeholder, RawSection, Token};
 
 use super::value::{ErrorKind, number_to_general_text};
 use crate::{DateSystem, Locale};
@@ -24,16 +23,21 @@ pub(crate) struct FormatContext {
     pub(crate) date_system: DateSystem,
     /// The regional format whose month, weekday, and `AM`/`PM` names date sections show.
     pub(crate) locale: Locale,
-    /// Whether a `*` fill shows nothing, as in `TEXT`, which Excel 16.114 shows without the fill
-    /// character (`TEXT(1.5,"*x0")` is `2`; excel-measure RESULTS.md, section B). A cell repeats
-    /// the character across its column, whose width is not an input, so the display text of a
-    /// code with a fill is unsupported.
-    pub(crate) drops_fill: bool,
-    /// Whether the codes `TEXT` formatted in 0.1.26 keep that release's rules where Excel differs
-    /// (see `legacy`), as the formula functions do so that their values stay the same. The display
-    /// text of a cell follows Excel.
-    pub(crate) keeps_earlier_subset: bool,
+    /// Whether the code formats a `TEXT`, `DOLLAR`, or `FIXED` result rather than a cell's
+    /// display text. `TEXT` shows a `*` fill as nothing (`TEXT(1.5,"*x0")` is `2`; excel-measure
+    /// RESULTS.md, section B), where a cell repeats the character across its column, whose width
+    /// is not an input, so the display text of a code with a fill is unsupported. `TEXT` also
+    /// rejects `General` for text (`TEXT("abc","General")` is `#VALUE!`, Mac Excel 16.114), which
+    /// a cell shows as written.
+    pub(crate) formula: bool,
+    /// Whether numbers round by their fifteen-significant-digit decimal, as Excel shows them,
+    /// rather than by their binary value.
+    pub(crate) decimal: bool,
 }
+
+/// The most characters Excel formats a number to: `TEXT(1E+254,"0")` shows 255 digits and
+/// `TEXT(1E+255,"0")` is `#VALUE!` (Mac Excel 16.114).
+const MAX_FORMATTED_CHARACTERS: usize = 255;
 
 /// Formats a number with `format`, as `TEXT` does.
 pub(crate) fn format_number(
@@ -42,47 +46,117 @@ pub(crate) fn format_number(
     context: FormatContext,
 ) -> Result<String, ErrorKind> {
     let sections = lexer::lex(format)?;
+    check_code(&sections)?;
     let chosen = choose_number_section(&sections, value)?;
-    let earlier_subset = context.keeps_earlier_subset && legacy::accepts(format);
-    render_number_section(&chosen.section.tokens, chosen, context, earlier_subset).map_err(|kind| {
-        // Only the 0.1.26 subset reported a number past the engine's digits as `#NUM!`; Excel
-        // still shows such a number, so other codes report it as unsupported, as `FIXED` does.
-        if kind == ErrorKind::Num && !earlier_subset {
+    // A number past what the engine renders, such as a fraction of 2^53 units, is unsupported.
+    let text = render_number_section(&chosen.section.tokens, chosen, context).map_err(|kind| {
+        if kind == ErrorKind::Num {
             ErrorKind::Unsupported
         } else {
             kind
         }
-    })
+    })?;
+    if text.chars().count() > MAX_FORMATTED_CHARACTERS {
+        return Err(ErrorKind::Value);
+    }
+    Ok(text)
 }
 
-/// Formats text with `format`: the fourth section, or a lone section holding `@`, places the text
-/// at each `@`; a code without a text section shows the text unchanged.
-pub(crate) fn format_text(text: &str, format: &str) -> Result<String, ErrorKind> {
+/// Formats text with `format`, as Mac Excel 16.114 formats text and logical values in `TEXT`: the
+/// fourth section places the text at each `@` and rejects digits, `@` in another section, or a
+/// condition; with fewer sections, a last section holding `@` places the text and an earlier one
+/// rejects the code (`TEXT("abc","0;""x""@")` is `xabc`, `TEXT("abc","@;0")` is `#VALUE!`); a code
+/// without a text section shows the text unchanged, whatever conditions its number sections hold.
+pub(crate) fn format_text(
+    text: &str,
+    format: &str,
+    context: FormatContext,
+) -> Result<String, ErrorKind> {
     let sections = lexer::lex(format)?;
-    let holds_text = |section: &RawSection| {
-        section
-            .tokens
+    check_code(&sections)?;
+    if context.formula
+        && sections
             .iter()
-            .any(|token| matches!(token, Token::TextValue))
-    };
-    // How a conditional code formats text has not been measured.
-    if sections.iter().any(|section| section.condition.is_some()) {
+            .any(|section| section.tokens.contains(&Token::General))
+    {
+        return Err(ErrorKind::Value);
+    }
+    let holds_text = |section: &RawSection| section.tokens.contains(&Token::TextValue);
+    let (earlier, last) = sections.split_at(sections.len() - 1);
+    let section = &last[0];
+    if earlier.iter().any(holds_text) {
+        return Err(ErrorKind::Value);
+    }
+    if sections.len() == 4 {
+        if section.condition.is_some() || shows_digits(&section.tokens) {
+            return Err(ErrorKind::Value);
+        }
+    } else if !holds_text(section) {
+        return Ok(text.to_owned());
+    } else if section.condition.is_some() || shows_digits(&section.tokens) {
+        // A conditional text section and digits beside `@` have not been measured.
         return Err(ErrorKind::Unsupported);
     }
-    let section = match sections.as_slice() {
-        [.., text_section] if sections.len() == 4 => text_section,
-        [only] if holds_text(only) => only,
-        _ if sections.iter().any(holds_text) => return Err(ErrorKind::Unsupported),
-        _ => return Ok(text.to_owned()),
-    };
     let mut output = String::new();
     for token in &section.tokens {
         match token {
             Token::TextValue => output.push_str(text),
+            Token::Fill if context.formula => {}
             _ => output.push_str(&literal_text(token)?),
         }
     }
     Ok(output)
+}
+
+/// Rejects a code Mac Excel 16.114 answers with `#VALUE!` whichever section formats the value:
+/// a letter it reads as no code (`TEXT(5,"0;0n")`), or digit placeholders beside date, time, era,
+/// or weekday codes (`TEXT(5,"0;0 d")`, `TEXT("abc","0 g")`, `TEXT(0.5,"ss.##")`).
+fn check_code(sections: &[RawSection]) -> Result<(), ErrorKind> {
+    let mut unsupported = false;
+    for section in sections {
+        let digits = shows_digits(&section.tokens);
+        for token in &section.tokens {
+            let checked = match token {
+                Token::Invalid(_) => Err(ErrorKind::Value),
+                Token::Elapsed { .. } if digits => Err(ErrorKind::Value),
+                Token::Letters { letter, count, .. } if digits => {
+                    number::letters_beside_digits(*letter, *count)
+                }
+                _ => Ok(()),
+            };
+            match checked {
+                Err(ErrorKind::Value) => return Err(ErrorKind::Value),
+                Err(_) => unsupported = true,
+                Ok(()) => {}
+            }
+        }
+    }
+    if unsupported {
+        Err(ErrorKind::Unsupported)
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether a section shows digits: a digit placeholder other than the `0`s of `ss.00`.
+fn shows_digits(tokens: &[Token]) -> bool {
+    let mut sub_second = false;
+    for (index, token) in tokens.iter().enumerate() {
+        match token {
+            Token::DecimalPoint => {
+                sub_second = index.checked_sub(1).is_some_and(|before| {
+                    matches!(
+                        tokens[before],
+                        Token::Letters { letter: 's', .. } | Token::Elapsed { unit: 's', .. }
+                    )
+                });
+            }
+            Token::Placeholder(Placeholder::Zero) if sub_second => {}
+            Token::Placeholder(_) => return true,
+            _ => sub_second = false,
+        }
+    }
+    false
 }
 
 /// The section a number selected and the value that section renders.
@@ -143,16 +217,13 @@ fn choose_number_section(
     }
 }
 
-/// Renders the chosen section; `earlier_subset` tells whether the code is one the 0.1.26 subset
-/// formatted, whose rules it keeps.
 fn render_number_section(
     tokens: &[Token],
     chosen: ChosenSection<'_>,
     context: FormatContext,
-    earlier_subset: bool,
 ) -> Result<String, ErrorKind> {
     let without_fill;
-    let tokens = if context.drops_fill && tokens.contains(&Token::Fill) {
+    let tokens = if context.formula && tokens.contains(&Token::Fill) {
         without_fill = tokens
             .iter()
             .filter(|token| **token != Token::Fill)
@@ -168,14 +239,6 @@ fn render_number_section(
     if tokens.iter().any(|token| matches!(token, Token::TextValue)) {
         return Err(ErrorKind::Unsupported);
     }
-    // Excel rejects `n`, `N`, `B`, and `E` as codes; the 0.1.26 subset showed them as written.
-    if !earlier_subset
-        && tokens
-            .iter()
-            .any(|token| matches!(token, Token::Invalid(_)))
-    {
-        return Err(ErrorKind::Value);
-    }
     if datetime::is_date_section(tokens) {
         if chosen.value < 0.0 {
             return Err(ErrorKind::Unsupported);
@@ -189,7 +252,7 @@ fn render_number_section(
         .iter()
         .any(|token| matches!(token, Token::Placeholder(_)))
     {
-        return number::render(tokens, chosen.value, chosen.signed, earlier_subset);
+        return number::render(tokens, chosen.value, chosen.signed, context.decimal);
     }
     render_literal_section(tokens, chosen)
 }
