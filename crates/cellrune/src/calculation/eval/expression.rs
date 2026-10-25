@@ -443,7 +443,18 @@ impl Engine<'_> {
             Expr::ImplicitIntersection(inner) => {
                 self.eval_implicit_intersection_scalar(context, inner)
             }
-            Expr::Array(_) => ScalarEvaluation::new(Value::Error(ErrorKind::Unsupported)),
+            // Outside an array context an array constant stands for its first element, as Mac
+            // Excel 16.114 reads `LEN({"a","bb"})` in a formula that is not an array formula as
+            // `LEN("a")`.
+            Expr::Array(rows) => {
+                let cols = rows.first().map_or(0, Vec::len);
+                match rows.first().and_then(|row| row.first()) {
+                    Some(first) if rows.iter().all(|row| row.len() == cols) => {
+                        self.eval_scalar_evaluation(context, first)
+                    }
+                    _ => ScalarEvaluation::new(Value::Error(ErrorKind::Value)),
+                }
+            }
             Expr::Name(name) => match context.binding(name) {
                 Some(value) => self.scalar_from_scope(context, value),
                 None => match self.resolve_name_expr_with_id_in_context(context, name) {

@@ -1856,6 +1856,29 @@ than guessing a name from a different XLSX crate (`calamine`,
   `INDEX(reference, row, 0)` returns the selected complete row, and zero for
   both indexes returns the complete reference. Scalar formulas apply legacy
   implicit intersection; array contexts materialize the selected rectangle.
+  Row, column, or area indexes that hold arrays select one value per element
+  (`INDEX(A1:C3,{1;3},{1,2})` is a 2-by-2 array, `SUM` of it adds four
+  cells); an element selecting a whole row or column takes its first cell.
+- A function that takes a value where an array arrives is called once per
+  element in an array context — a dynamic array formula, an array formula, or
+  an argument that takes an array such as those of `SUM` and `SUMPRODUCT` —
+  and its results keep the array's shape, broadcasting a row against a column
+  as the operators do (`=SQRT(A1:A3)` spills three roots,
+  `SUMPRODUCT(LEN(A1:A3))` adds three lengths, `ROUND(A1:A3,{0,1})` is 3 by
+  2). A blank element reaches the function as a blank cell, not as an omitted
+  argument (`LEFT("abc",B1:B2)` with `B1` blank gives `""` there). The value
+  of a formula that is not an array formula intersects a range implicitly, as
+  before, and takes an array constant's first element (`=LEN({"a","bb"})` is
+  1). `TYPE` is 64 for an array or a range of several cells in an array
+  context and for an array constant. `IFERROR` and `IFNA` take arrays element
+  by element (`{=SUM(IFERROR(1/A1:A3,0))}`). A function without established
+  array rules — one that returns an array or a reference of its own, such as
+  `SEQUENCE`, `OFFSET`, and `XLOOKUP` — is
+  `calculation.unsupported_expression` when a value argument holds an array
+  value; a range there keeps implicit intersection. The function catalog's
+  `.returns_array()` marks functions with array results of their own (`IF`,
+  `IFERROR`, `IFNA`, `INDEX`, `FILTER`, …), not those that only take arrays
+  element by element.
 - Unary and binary array operators containing whole-column references resolve
   one common row extent from the greatest populated row among the columns
   those operands reference, with a one-row minimum on an otherwise empty

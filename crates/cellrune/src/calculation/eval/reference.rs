@@ -9,8 +9,9 @@ use crate::calculation::coerce::{to_logical, to_number, to_text};
 use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
 use crate::calculation::functions::kernel::{LegacyFunction, LookupFunction};
 use crate::calculation::functions::{
-    DynamicFunction, Evaluator, callable_call_scope, function_call_shape_is_valid,
-    function_dependency_kind, function_evaluator, let_reference, prepare_evaluator_arguments,
+    DynamicFunction, Evaluator, callable_call_scope, evaluator_value_argument_holds_array,
+    function_call_shape_is_valid, function_dependency_kind, function_evaluator, let_reference,
+    prepare_evaluator_arguments,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::parse_formula_with_limits;
@@ -503,6 +504,11 @@ impl Engine<'_> {
         let prepared = prepare_evaluator_arguments(evaluator, args).ok_or(ErrorKind::Value)?;
         let args = prepared.as_ref();
         let context = context.with_arguments(args);
+        // A reference array (`OFFSET(A1,{0;1},0)`) is not modeled; reading the first element
+        // would answer for one reference.
+        if evaluator_value_argument_holds_array(evaluator, args) {
+            return Err(ErrorKind::Unsupported);
+        }
         if dynamic_kind == DynamicReferenceKind::Indirect {
             if let Some(style) = args.get(1)
                 && !to_logical(&self.eval_scalar(context, style))?

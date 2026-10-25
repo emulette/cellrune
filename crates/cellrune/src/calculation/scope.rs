@@ -137,6 +137,14 @@ impl ScopeEntry {
         }
     }
 
+    /// Replaces the bound value, reusing its allocation when nothing else holds it.
+    pub(super) fn set_value(&mut self, value: ScopeValue) {
+        match Arc::get_mut(&mut self.value) {
+            Some(bound) => *bound = value,
+            None => self.value = Arc::new(value),
+        }
+    }
+
     fn matches(&self, name: &str) -> bool {
         self.name.as_ref() == canonical_local_name(name)
     }

@@ -4,7 +4,7 @@ use super::super::eval::{Engine, EvalContext};
 use super::super::numeric_text::NumericText;
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
-use super::kernel::{InformationArrayFunction, InformationFunction};
+use super::kernel::InformationFunction;
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -45,6 +45,11 @@ pub(super) fn call(
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
+    // An array constant is an array even where its first element stands for it elsewhere (Mac
+    // Excel 16.114 `TYPE({1,2})` in a formula that is not an array formula is 64).
+    if function == InformationFunction::Type && is_array_constant(&args[0]) {
+        return Value::Number(ARRAY_TYPE);
+    }
     let value = if function == InformationFunction::T {
         match engine.resolve_rect_expr(context, &args[0]) {
             Ok(rect) => engine
@@ -61,29 +66,38 @@ pub(super) fn call(
     apply(function, value, engine.numeric_text())
 }
 
-pub(super) fn call_array(
+/// `TYPE` where its argument may be an array: an array or a range of several cells is 64, as Mac
+/// Excel 16.114 returns for `=TYPE(A1:A3)` and `=TYPE({1,2})`.
+pub(super) fn type_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    function: InformationArrayFunction,
     args: &[Expr],
-) -> Option<Result<Array, ErrorKind>> {
-    if args.len() != 1 {
-        return None;
-    }
-    let array = match engine.eval_array(context, &args[0]) {
-        Ok(array) if !array.is_scalar() => array,
-        Ok(_) => return None,
-        Err(kind) => return Some(Err(kind)),
+) -> Result<Array, ErrorKind> {
+    let [argument] = args else {
+        return Err(ErrorKind::Value);
     };
-    Some(Ok(Array {
-        rows: array.rows,
-        cols: array.cols,
-        data: array
-            .data
-            .into_iter()
-            .map(|value| apply(function.scalar_function(), value, engine.numeric_text()))
-            .collect(),
-    }))
+    let array = match engine.eval_array(context, argument) {
+        Ok(array) => array,
+        Err(kind) if kind.is_engine_issue() => return Err(kind),
+        Err(kind) => Array::scalar(Value::Error(kind)),
+    };
+    let value = if array.is_scalar() {
+        value_type(array.data.into_iter().next().unwrap_or(Value::Blank))
+    } else {
+        Value::Number(ARRAY_TYPE)
+    };
+    Ok(Array::scalar(value))
+}
+
+/// The `TYPE` of an array.
+const ARRAY_TYPE: f64 = 64.0;
+
+fn is_array_constant(expr: &Expr) -> bool {
+    match expr {
+        Expr::Array(_) => true,
+        Expr::Paren(inner) => is_array_constant(inner),
+        _ => false,
+    }
 }
 
 fn apply(function: InformationFunction, value: Value, numeric_text: NumericText) -> Value {

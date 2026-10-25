@@ -46,8 +46,8 @@ pub(super) fn call_legacy_array(
 ) -> Option<Result<Array, ErrorKind>> {
     match function {
         LegacyArrayFunction::If => Some(if_array(engine, context, args)),
-        LegacyArrayFunction::CountIf => countifs_array(engine, context, args, true),
-        LegacyArrayFunction::CountIfs => countifs_array(engine, context, args, false),
+        LegacyArrayFunction::IfError => Some(if_error_array(engine, context, args, false)),
+        LegacyArrayFunction::IfNa => Some(if_error_array(engine, context, args, true)),
         LegacyArrayFunction::Index => Some(index_array(engine, context, args)),
     }
 }
@@ -113,6 +113,55 @@ fn if_array(
                 Err(kind) => Value::Error(kind),
             };
             data.push(selected);
+        }
+    }
+    Ok(Array { rows, cols, data })
+}
+
+/// `IFERROR`, or `IFNA` with `only_na`, over arrays: each element of the value that is an error,
+/// or `#N/A` for `IFNA`, takes the fallback's element, so `{=SUM(IFERROR(1/A1:A3,0))}` adds the
+/// reciprocals that exist. The fallback is evaluated only when an element needs it.
+fn if_error_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    only_na: bool,
+) -> Result<Array, ErrorKind> {
+    let [value, fallback] = args else {
+        return Err(ErrorKind::Value);
+    };
+    let caught = |value: &Value| match value {
+        Value::Error(kind) => !kind.is_engine_issue() && (!only_na || *kind == ErrorKind::NA),
+        _ => false,
+    };
+    let value = match engine.eval_array(context, value) {
+        Ok(value) => value,
+        Err(kind) if kind.is_engine_issue() => return Err(kind),
+        Err(kind) => Array::scalar(Value::Error(kind)),
+    };
+    if let Some(Value::Error(kind)) = value
+        .data
+        .iter()
+        .find(|element| matches!(element, Value::Error(kind) if kind.is_engine_issue()))
+    {
+        return Err(*kind);
+    }
+    if !value.data.iter().any(caught) {
+        return Ok(value);
+    }
+    let fallback = engine.eval_array(context, fallback)?;
+    let (rows, cols) = broadcast_shape(&value, &fallback)?;
+    let cells = u64::from(rows) * u64::from(cols);
+    engine.ensure_array_cells(cells)?;
+    let mut data = Vec::with_capacity(cells as usize);
+    for row in 0..rows {
+        for column in 0..cols {
+            let element = element_at(&value, row, column);
+            data.push(if caught(element) {
+                element_at(&fallback, row, column).clone()
+            } else {
+                element.clone()
+            });
         }
     }
     Ok(Array { rows, cols, data })
@@ -452,80 +501,6 @@ fn kernel_countifs(
     }
 }
 
-fn countifs_array(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
-    args: &[Expr],
-    single_pair: bool,
-) -> Option<Result<Array, ErrorKind>> {
-    let pairs = match split_pairs(engine, context, args, single_pair) {
-        Ok(pairs) => pairs,
-        Err(_) => return None,
-    };
-    let has_broadcast = pairs
-        .criteria_exprs
-        .iter()
-        .any(|expr| multi_cell_rect(engine, context, expr).is_some());
-    if !has_broadcast {
-        return None;
-    }
-    Some(countifs_broadcast(engine, context, &pairs))
-}
-
-fn countifs_broadcast(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
-    pairs: &CriteriaPairs<'_>,
-) -> Result<Array, ErrorKind> {
-    let mut criteria_arrays = Vec::with_capacity(pairs.criteria_exprs.len());
-    for expr in &pairs.criteria_exprs {
-        if multi_cell_rect(engine, context, expr).is_some() {
-            criteria_arrays.push(engine.eval_array(context, expr)?);
-        } else {
-            criteria_arrays.push(Array::scalar(engine.eval_scalar(context, expr)));
-        }
-    }
-    let mut rows = 1_u32;
-    let mut cols = 1_u32;
-    for array in &criteria_arrays {
-        let scalar_shape = Array {
-            rows,
-            cols,
-            data: Vec::new(),
-        };
-        let (next_rows, next_cols) = broadcast_shape(&scalar_shape, array)?;
-        rows = next_rows;
-        cols = next_cols;
-    }
-    engine.ensure_array_cells(u64::from(rows) * u64::from(cols))?;
-    let mut data = Vec::with_capacity((rows * cols) as usize);
-    let mut matcher = CriteriaRuntime::new(engine, context);
-    for row in 0..rows {
-        for col in 0..cols {
-            let mut criteria = Vec::with_capacity(criteria_arrays.len());
-            let mut element_error = None;
-            for array in &criteria_arrays {
-                match matcher.compile_criteria(element_at(array, row, col)) {
-                    Ok(criterion) => criteria.push(criterion),
-                    Err(kind) => {
-                        element_error = Some(kind);
-                        break;
-                    }
-                }
-            }
-            if let Some(kind) = element_error {
-                data.push(Value::Error(kind));
-                continue;
-            }
-            match count_matches(engine, context, &pairs.rects, &criteria, &mut matcher) {
-                Ok(count) => data.push(Value::Number(count)),
-                Err(kind) => data.push(Value::Error(kind)),
-            }
-        }
-    }
-    Ok(Array { rows, cols, data })
-}
-
 fn kernel_sumproduct(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
@@ -580,13 +555,50 @@ fn kernel_index(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
         .unwrap_or_else(Value::Error)
 }
 
+/// Whether `expr` is an `INDEX` call whose row, column, or area index holds an array, which selects
+/// an array of values rather than one reference.
+pub(super) fn is_index_over_arrays(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    expr: &Expr,
+) -> bool {
+    match expr {
+        Expr::Paren(inner) => is_index_over_arrays(engine, context, inner),
+        Expr::Call { name, args }
+            if context.binding(name).is_none()
+                && engine
+                    .resolve_name_expr_with_id_in_context(context, name)
+                    .is_none()
+                && super::function_evaluator(name)
+                    == Some(super::Evaluator::Legacy(LegacyFunction::Index)) =>
+        {
+            !super::elementwise::lifted_positions(engine, context, args, 1..args.len()).is_empty()
+        }
+        _ => false,
+    }
+}
+
+/// `INDEX` in an array context. Row, column, or area indexes that hold arrays select one value per
+/// element, as Mac Excel 16.114 returns `{11,12;31,32}` for `INDEX(Y1:Z3,{1;3},{1,2})`; an element
+/// that selects a whole row or column takes its first cell (`INDEX(Y1:Z3,{1;3},0)` is `{11;31}`).
 fn index_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
-    let rect = engine.resolve_index_rect(context, args)?;
-    engine.array_from_rect(context, &args[0], rect)
+    let lifted = super::elementwise::lifted_positions(engine, context, args, 1..args.len());
+    if lifted.is_empty() {
+        let rect = engine.resolve_index_rect(context, args)?;
+        return engine.array_from_rect(context, &args[0], rect);
+    }
+    super::elementwise::lift(engine, context, args, args, &lifted, |context, args, _| {
+        engine
+            .resolve_index_rect(context, args)
+            .and_then(|rect| {
+                engine.read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
+            })
+            .unwrap_or_else(Value::Error)
+    })
 }
 
 fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

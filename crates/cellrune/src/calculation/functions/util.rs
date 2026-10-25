@@ -126,7 +126,12 @@ fn collect_filtered_argument_values(
             )?;
             continue;
         }
-        if let Ok(reference) = engine.resolve_reference_value_expr(context, arg) {
+        let reference = if super::legacy::is_index_over_arrays(engine, context, arg) {
+            Err(ErrorKind::Value)
+        } else {
+            engine.resolve_reference_value_expr(context, arg)
+        };
+        if let Ok(reference) = reference {
             if matches!(&reference, super::super::runtime::ReferenceValue::Empty) {
                 return Err(ErrorKind::Ref);
             }

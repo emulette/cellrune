@@ -8,13 +8,12 @@ use super::contract::CallContract;
 use super::kernel::{
     AggregateFunction, ArrayEvaluator, ArrayFunction, CombinatoricsFunction, DatabaseFunction,
     DateAdditionalFunction, DateFunction, DistributionFunction, DynamicArrayFunction,
-    DynamicFunction, ElementwiseArrayFunction, EngineeringFunction, Evaluator,
-    FinancialAdditionalFunction, FinancialFunction, FixedIncomeFunction, GroupedArrayFunction,
-    GroupedFunction, InformationArrayFunction, InformationFunction, LegacyArrayFunction,
-    LegacyFunction, LogicalFunction, LookupFunction, MathFunction, ModernTextArrayFunction,
-    ModernTextFunction, RegressionFunction, RomanFunction, StatisticalAdditionalFunction,
-    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
-    TrigonometryFunction,
+    DynamicFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
+    FinancialFunction, FixedIncomeFunction, GroupedArrayFunction, GroupedFunction,
+    InformationFunction, LegacyArrayFunction, LegacyFunction, LogicalFunction, LookupFunction,
+    MathFunction, ModernTextArrayFunction, ModernTextFunction, RegressionFunction, RomanFunction,
+    StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
+    TextAdditionalFunction, TextFunction, TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -209,6 +208,13 @@ impl FunctionDescriptor {
         self.array_evaluator = Some(evaluator);
         self.result_kind = FunctionResultKind::Array;
         self.catalog_array_result = true;
+        self
+    }
+
+    /// Evaluates a function that returns one value with `evaluator` in an array context, as
+    /// `TYPE` does to answer 64 for an array.
+    const fn with_scalar_array_evaluator(mut self, evaluator: ArrayEvaluator) -> Self {
+        self.array_evaluator = Some(evaluator);
         self
     }
 
@@ -505,13 +511,12 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(If, "IF", Legacy)
         .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::If)),
     function!(And, "AND", Legacy),
-    function!(IfError, "IFERROR", Legacy),
+    function!(IfError, "IFERROR", Legacy)
+        .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::IfError)),
     function!(Lower, "LOWER", Legacy),
     function!(Text, "TEXT", Legacy),
-    function!(CountIf, "COUNTIF", Legacy)
-        .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::CountIf)),
-    function!(CountIfs, "COUNTIFS", Legacy)
-        .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::CountIfs)),
+    function!(CountIf, "COUNTIF", Legacy),
+    function!(CountIfs, "COUNTIFS", Legacy),
     function!(SumProduct, "SUMPRODUCT", Legacy),
     function!(Index, "INDEX", Legacy)
         .with_reference_array_result(ArrayEvaluator::Legacy(LegacyArrayFunction::Index))
@@ -523,7 +528,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Not, "NOT", Logical),
     function!(Or, "OR", Logical),
     function!(Xor, "XOR", Logical),
-    function!(IfNa, "IFNA", Logical),
+    function!(IfNa, "IFNA", Logical)
+        .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::IfNa)),
     function!(Ifs, "IFS", Logical),
     function!(Switch, "SWITCH", Logical),
     function!(Sum, "SUM", Aggregate)
@@ -569,8 +575,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Sum, "DSUM", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(Var, "DVAR", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(VarP, "DVARP", Database).with_minimum_version(CompatibilityVersion::V0_1_11),
-    function!(Abs, "ABS", Math)
-        .with_array_evaluator(ArrayEvaluator::Elementwise(ElementwiseArrayFunction::Abs)),
+    function!(Abs, "ABS", Math),
     function!(Base, "BASE", Math),
     function!(Ceiling, "CEILING", Math),
     function!(CeilingMath, "CEILING.MATH", Math),
@@ -748,60 +753,38 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_array_evaluator(ArrayEvaluator::Grouped(GroupedArrayFunction::PivotBy))
         .with_minimum_version(CompatibilityVersion::V0_1_10),
     function!(Cell, "CELL", Information).with_minimum_version(CompatibilityVersion::V0_1_27),
-    function!(ErrorType, "ERROR.TYPE", Information).with_array_evaluator(
-        ArrayEvaluator::Information(InformationArrayFunction::ErrorType),
-    ),
+    function!(ErrorType, "ERROR.TYPE", Information),
     function!(FormulaText, "FORMULATEXT", Information)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::FormulaText,
         ))
         .with_sheet_span_policy(VALUE_ON_SHEET_SPAN)
         .with_minimum_version(CompatibilityVersion::V0_1_10),
-    function!(IsBlank, "ISBLANK", Information).with_array_evaluator(ArrayEvaluator::Information(
-        InformationArrayFunction::IsBlank,
-    )),
-    function!(IsErr, "ISERR", Information)
-        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::IsErr)),
-    function!(IsError, "ISERROR", Information).with_array_evaluator(ArrayEvaluator::Information(
-        InformationArrayFunction::IsError,
-    )),
-    function!(IsEven, "ISEVEN", Information).with_array_evaluator(ArrayEvaluator::Information(
-        InformationArrayFunction::IsEven,
-    )),
+    function!(IsBlank, "ISBLANK", Information),
+    function!(IsErr, "ISERR", Information),
+    function!(IsError, "ISERROR", Information),
+    function!(IsEven, "ISEVEN", Information),
     function!(IsFormula, "ISFORMULA", Information)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::FormulaPredicate,
         ))
         .with_sheet_span_policy(VALUE_ON_SHEET_SPAN)
         .with_minimum_version(CompatibilityVersion::V0_1_10),
-    function!(IsLogical, "ISLOGICAL", Information).with_array_evaluator(
-        ArrayEvaluator::Information(InformationArrayFunction::IsLogical),
-    ),
-    function!(IsNa, "ISNA", Information)
-        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::IsNa)),
-    function!(IsNonText, "ISNONTEXT", Information).with_array_evaluator(
-        ArrayEvaluator::Information(InformationArrayFunction::IsNonText),
-    ),
-    function!(IsNumber, "ISNUMBER", Information).with_array_evaluator(ArrayEvaluator::Information(
-        InformationArrayFunction::IsNumber,
-    )),
-    function!(IsOdd, "ISODD", Information)
-        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::IsOdd)),
+    function!(IsLogical, "ISLOGICAL", Information),
+    function!(IsNa, "ISNA", Information),
+    function!(IsNonText, "ISNONTEXT", Information),
+    function!(IsNumber, "ISNUMBER", Information),
+    function!(IsOdd, "ISODD", Information),
     function!(IsRef, "ISREF", Information)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::Predicate,
         ))
         .with_sheet_span_policy(VALUE_ON_SHEET_SPAN),
-    function!(IsText, "ISTEXT", Information).with_array_evaluator(ArrayEvaluator::Information(
-        InformationArrayFunction::IsText,
-    )),
-    function!(N, "N", Information)
-        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::N)),
+    function!(IsText, "ISTEXT", Information),
+    function!(N, "N", Information),
     function!(Na, "NA", Information),
-    function!(T, "T", Information)
-        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::T)),
-    function!(Type, "TYPE", Information)
-        .with_array_evaluator(ArrayEvaluator::Information(InformationArrayFunction::Type)),
+    function!(T, "T", Information),
+    function!(Type, "TYPE", Information).with_scalar_array_evaluator(ArrayEvaluator::Type),
     function!(Concat, "CONCAT", Text),
     function!(Exact, "EXACT", Text),
     function!(Find, "FIND", Text),
@@ -1482,7 +1465,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "2aad3e6874cde2c1de382dd5ef321d4b4c29684daf1981d7a6a1c5590a0cc045",
+            actual, "241b67b64f2df27bb21b13f1406624d9a4035d50416af97adfc48ed14eaa7cad",
             "stable v0.1.10 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1498,7 +1481,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "3cd26d201cee732fd556d6d8cdfc742b7de99e887ac1f1c72a4d0d67a0aee93d",
+            actual, "7fcd905a8ebe2c47ef82c1710470099714671de13f7075758d949570a6b51c45",
             "stable v0.1.11 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1578,7 +1561,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "8f9e63dcadbd7b7839f1fcb22471519cb9dafa696925f3fc6e1ee68d9377c4d0",
+            actual, "d638af7925693848a2cfc4edc3ee0e3f92eed1b58f2f9a000c217914712b3d4b",
             "stable v0.1.12 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1693,7 +1676,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "881849f24d58c69772f41a2507159277dae6f0d9d42589d93720428c6742de95",
+            actual, "5d9136f9a8c12d6bc0e39b8fc48b7942158adbb104b89bef1447ea707efe8be4",
             "stable v0.1.13 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1709,7 +1692,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "e554fd48342e8e88b0c9200f211f626c02dc0454baec4b00c8fbaf9007ac6379",
+            actual, "c4b1c62cc55c5de65fd78335b2bfee483174d22f2ee63971d9f52701fe707adc",
             "stable v0.1.14 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1725,7 +1708,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "8e1982322a0208193bfe6966b21fd17ab5f6bab13696194c79c9847f5eed8c5e",
+            actual, "7e31651d8aa1ca9cdc723e574ac9ac457699973a44e8188afccc2bd7cb485259",
             "stable v0.1.16 semantic snapshot changed:\n{snapshot}",
         );
     }

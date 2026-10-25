@@ -4,8 +4,6 @@ use std::collections::BTreeSet;
 use super::ast::Expr;
 use super::eval::{Engine, EvalContext};
 use super::lambda::{LocalNamePolicy, definition_from_args, validate_local_name};
-use super::operators::element_at;
-use super::runtime::Array;
 use super::scope::{ArrayEvaluation, canonical_local_name};
 use super::sheet_span::SheetSpanPolicy;
 use super::value::{ErrorKind, Value};
@@ -38,6 +36,7 @@ mod date_additional;
 pub(super) mod descriptor;
 mod distribution;
 mod dynamic;
+mod elementwise;
 mod engineering;
 mod engineering_complex;
 mod filter_xml;
@@ -227,6 +226,18 @@ pub(in crate::calculation) fn call_function_evaluation(
     if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args) {
         return super::scope::ScalarEvaluation::new(Value::Error(kind));
     }
+    evaluate_prepared(descriptor, engine, context, args, written)
+}
+
+/// Evaluates a call to `descriptor` with its prepared arguments; `written` holds the arguments as
+/// the formula wrote them.
+fn evaluate_prepared(
+    descriptor: FunctionDescriptor,
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    written: &[Expr],
+) -> super::scope::ScalarEvaluation {
     match descriptor.evaluator() {
         Evaluator::Dynamic(kernel::DynamicFunction::Map) => {
             map_scalar_with_trace(engine, context, args)
@@ -456,22 +467,25 @@ pub(super) fn call_function_array(
     if !call_shape_is_valid(descriptor, args) {
         return descriptor.array_evaluator().map(|_| Err(ErrorKind::Value));
     }
+    let written = args;
     let prepared = CallArguments::for_call(context, descriptor, args);
     let args = prepared.as_slice();
     let context = context.with_arguments(args);
-    match descriptor.array_evaluator()? {
+    let Some(evaluator) = descriptor.array_evaluator() else {
+        return elementwise::call(engine, context, descriptor, args, written);
+    };
+    if !evaluator.reads_value_arrays() && elementwise::value_argument_holds_array(descriptor, args)
+    {
+        return Some(Err(ErrorKind::Unsupported));
+    }
+    match evaluator {
         ArrayEvaluator::Legacy(function) => {
             legacy::call_legacy_array(engine, context, function, args)
                 .map(|result| result.map(ArrayEvaluation::new))
         }
-        ArrayEvaluator::Information(function) => {
-            information::call_array(engine, context, function, args)
-                .map(|result| result.map(ArrayEvaluation::new))
+        ArrayEvaluator::Type => {
+            Some(information::type_array(engine, context, args).map(ArrayEvaluation::new))
         }
-        ArrayEvaluator::Elementwise(function) => Some(
-            call_elementwise_array(engine, context, function.scalar_function(), args)
-                .map(ArrayEvaluation::new),
-        ),
         ArrayEvaluator::Dynamic(function) => {
             Some(helper_array_with_trace(engine, context, function, args))
         }
@@ -816,6 +830,19 @@ pub(in crate::calculation) fn prepare_evaluator_arguments<'formula>(
         .then(|| CallArguments::prepare(descriptor, args).expressions)
 }
 
+/// Whether a value argument of the function `evaluator` calls certainly holds an array value; see
+/// [`elementwise::value_argument_holds_array`].
+pub(in crate::calculation) fn evaluator_value_argument_holds_array(
+    evaluator: Evaluator,
+    args: &[Expr],
+) -> bool {
+    descriptor::descriptors()
+        .iter()
+        .copied()
+        .find(|descriptor| descriptor.evaluator() == evaluator)
+        .is_some_and(|descriptor| elementwise::value_argument_holds_array(descriptor, args))
+}
+
 pub(super) fn is_supported_function(name: &str) -> bool {
     descriptor::resolve(name).is_some()
 }
@@ -882,51 +909,6 @@ pub(super) fn function_reads_number_formats(name: &str) -> bool {
 
 pub(in crate::calculation) fn function_dependency_kind(name: &str) -> Option<DependencyKind> {
     descriptor::resolve(name).map(FunctionDescriptor::dependency_kind)
-}
-
-fn call_elementwise_array(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
-    function: kernel::MathFunction,
-    args: &[Expr],
-) -> Result<Array, ErrorKind> {
-    let arrays = args
-        .iter()
-        .map(|argument| engine.eval_array(context, argument))
-        .collect::<Result<Vec<_>, _>>()?;
-    let rows = arrays.iter().map(|array| array.rows).max().unwrap_or(1);
-    let cols = arrays.iter().map(|array| array.cols).max().unwrap_or(1);
-    let cells = u64::from(rows)
-        .checked_mul(u64::from(cols))
-        .ok_or(ErrorKind::Num)?;
-    engine.ensure_array_cells(cells)?;
-    engine.charge_function_iterations(
-        context,
-        cells
-            .checked_mul(args.len().max(1) as u64)
-            .ok_or(ErrorKind::Num)?,
-    )?;
-    let mut data = Vec::with_capacity(cells as usize);
-    for row in 0..rows {
-        for column in 0..cols {
-            let scalar_args = arrays
-                .iter()
-                .map(|array| value_as_expr(element_at(array, row, column)))
-                .collect::<Vec<_>>();
-            data.push(math::call(engine, context, function, &scalar_args));
-        }
-    }
-    Ok(Array { rows, cols, data })
-}
-
-fn value_as_expr(value: &Value) -> Expr {
-    match value {
-        Value::Blank => Expr::Missing,
-        Value::Number(number) => Expr::number(*number),
-        Value::Text(text) => Expr::Text(text.clone()),
-        Value::Logical(value) => Expr::Logical(*value),
-        Value::Error(kind) => Expr::ErrorLit(*kind),
-    }
 }
 
 pub(super) fn normalize_name(name: &str) -> String {

@@ -180,6 +180,9 @@ source build.
 `INDEX` follows Excel's zero-index reference behavior: a zero row or column selects the complete
 corresponding column or row, and zero for both selects the complete input range. Scalar formulas
 apply legacy implicit intersection, while array formulas can materialize the selected rectangle.
+In a dynamic or array formula, and in arguments that take arrays such as those of `SUMPRODUCT`, a
+function that takes a value is called once per element of an array it receives, as Excel does
+(`=SQRT(A1:A3)` spills three roots and `SUMPRODUCT(LEN(A1:A3))` adds three lengths).
 Unary and binary array operators that combine whole-column references use one common extent: the
 greatest populated row among the columns those operands reference, with a one-row minimum for an
 otherwise empty sheet. Cells in other columns of the same sheet do not widen it, so the value

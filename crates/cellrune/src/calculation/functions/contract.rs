@@ -1330,8 +1330,8 @@ impl InformationFunction {
             | Self::IsOdd
             | Self::IsText
             | Self::N
-            | Self::T
-            | Self::Type => CallContract::uniform(Arity::exact(1), ARRAY),
+            | Self::T => CallContract::uniform(Arity::exact(1), SCALAR),
+            Self::Type => CallContract::uniform(Arity::exact(1), ARRAY),
         }
     }
 }
@@ -1398,7 +1398,7 @@ impl TextAdditionalFunction {
             | Self::Value => CallContract::uniform(Arity::exact(1), SCALAR),
             Self::NumberValue => CallContract::uniform(Arity::range(1, 3), SCALAR)
                 .with_defaults(NUMBER_VALUE_DEFAULTS),
-            Self::Concatenate => CallContract::uniform(Arity::range(1, 255), ARRAY),
+            Self::Concatenate => CallContract::uniform(Arity::range(1, 255), SCALAR),
             Self::Dollar => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])
                 .with_defaults(DOLLAR_DEFAULTS),
             Self::Fixed => CallContract::positional(Arity::range(1, 3), &[SCALAR, SCALAR, SCALAR])

@@ -29,6 +29,8 @@ mod distribution_extensions;
 mod distributions;
 #[path = "calculation_behavior/double_byte.rs"]
 mod double_byte;
+#[path = "calculation_behavior/elementwise_arrays.rs"]
+mod elementwise_arrays;
 #[path = "calculation_behavior/financial_extensions.rs"]
 mod financial_extensions;
 #[path = "calculation_behavior/locale_profile.rs"]
@@ -2810,14 +2812,26 @@ fn function_usage_and_catalog_report_normalized_supported_demand() {
             .expect("XLOOKUP")
             .returns_array()
     );
-    for name in ["ABS", "IF", "COUNTIF", "COUNTIFS", "INDEX", "ISNUMBER"] {
-        assert!(
+    // Every function that takes a value returns an array element by element in an array context;
+    // the catalog marks the functions with array rules of their own.
+    for (name, returns_array) in [
+        ("IF", true),
+        ("IFERROR", true),
+        ("IFNA", true),
+        ("INDEX", true),
+        ("ABS", false),
+        ("COUNTIF", false),
+        ("ISNUMBER", false),
+        ("TYPE", false),
+    ] {
+        assert_eq!(
             catalog
                 .iter()
                 .find(|entry| entry.name() == name)
                 .unwrap_or_else(|| panic!("{name} catalog entry"))
                 .returns_array(),
-            "{name} must advertise its multi-cell array kernel",
+            returns_array,
+            "{name}",
         );
     }
 }

@@ -135,6 +135,24 @@ inventories, and measurements belong in the linked documentation rather than in 
   its text section passes 255 units. Conditions in the number sections no longer make
   the display text of a text cell unsupported, and a last section holding `@` formats it. Wrap the
   value in `VALUE` to keep the old `#VALUE!` for text.
+- A function that takes a value is called once per element of an array it receives in an array
+  context — a dynamic array formula, an array formula, or an argument that takes an array such as
+  those of `SUM` and `SUMPRODUCT` — as Excel does, instead of reading the one cell that intersects
+  the formula's row: `=SQRT(A1:A3)` spills three roots, `SUMPRODUCT(LEN(A1:A3))` and
+  `{=SUM(LEN(A1:A3))}` add three lengths, `SUMPRODUCT(--(MONTH(A1:A3)=1))` counts every January
+  date, `{=SUM(IFERROR(1/A1:A3,0))}` adds the reciprocals that exist, and `COUNTIF(A1:A3,{1,4})`
+  counts each criterion. A blank element is read as a blank cell, not as an omitted argument.
+  `INDEX` takes arrays of indexes (`INDEX(A1:C3,{1;3},{1,2})` is 2 by 2). A formula that is not an
+  array formula still intersects a range, and now takes an array constant's first element where it
+  reported `calculation.unsupported_expression` (`=LEN({"a","bb"})` is `1`). `TYPE` is `64` for an
+  array in an array context and for an array constant instead of the type of each element. A
+  function that returns an array or a reference of its own, such as `SEQUENCE`, `OFFSET`, and
+  `XLOOKUP`, is `calculation.unsupported_expression` when a value argument holds an array value.
+  The function catalog's `returns_array` is now `true` only for functions with array results of
+  their own: `IFERROR` and `IFNA` are now marked, and `ABS`, `COUNTIF`, `COUNTIFS`, the `IS`
+  functions, `N`, `T`, `ERROR.TYPE`, and `TYPE` no longer are. Formulas that relied on a scalar
+  function reading one cell of a range inside `SUMPRODUCT` or an array formula now see every
+  cell; wrap the range in `@` (implicit intersection) to keep the old value.
 - The `excel_near_zero` interop value of `arithmetic_semantics`, and
   `ArithmeticSemantics::ExcelNearZero`, keep their names while selecting all of the fifteen-digit rules above: near-zero correction,
   comparison, and rounding. The interop schema versions are unchanged because no key or value

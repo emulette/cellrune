@@ -738,48 +738,10 @@ impl Evaluator {
 
 function_enum!(LegacyArrayFunction {
     If,
-    CountIf,
-    CountIfs,
+    IfError,
+    IfNa,
     Index,
 });
-
-function_enum!(InformationArrayFunction {
-    ErrorType,
-    IsBlank,
-    IsErr,
-    IsError,
-    IsEven,
-    IsLogical,
-    IsNa,
-    IsNonText,
-    IsNumber,
-    IsOdd,
-    IsText,
-    N,
-    T,
-    Type,
-});
-
-impl InformationArrayFunction {
-    pub(super) const fn scalar_function(self) -> InformationFunction {
-        match self {
-            Self::ErrorType => InformationFunction::ErrorType,
-            Self::IsBlank => InformationFunction::IsBlank,
-            Self::IsErr => InformationFunction::IsErr,
-            Self::IsError => InformationFunction::IsError,
-            Self::IsEven => InformationFunction::IsEven,
-            Self::IsLogical => InformationFunction::IsLogical,
-            Self::IsNa => InformationFunction::IsNa,
-            Self::IsNonText => InformationFunction::IsNonText,
-            Self::IsNumber => InformationFunction::IsNumber,
-            Self::IsOdd => InformationFunction::IsOdd,
-            Self::IsText => InformationFunction::IsText,
-            Self::N => InformationFunction::N,
-            Self::T => InformationFunction::T,
-            Self::Type => InformationFunction::Type,
-        }
-    }
-}
 
 function_enum!(DynamicArrayFunction {
     ByCol,
@@ -789,8 +751,6 @@ function_enum!(DynamicArrayFunction {
     Scan,
 });
 
-function_enum!(ElementwiseArrayFunction { Abs });
-
 function_enum!(ModernTextArrayFunction {
     FilterXml,
     RegexExtract,
@@ -799,19 +759,11 @@ function_enum!(ModernTextArrayFunction {
 
 function_enum!(GroupedArrayFunction { GroupBy, PivotBy });
 
-impl ElementwiseArrayFunction {
-    pub(super) const fn scalar_function(self) -> MathFunction {
-        match self {
-            Self::Abs => MathFunction::Abs,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(in crate::calculation) enum ArrayEvaluator {
     Legacy(LegacyArrayFunction),
-    Information(InformationArrayFunction),
-    Elementwise(ElementwiseArrayFunction),
+    /// `TYPE`, which is 64 for an array rather than the type of each element.
+    Type,
     Dynamic(DynamicArrayFunction),
     Map,
     Array(ArrayFunction),
@@ -821,13 +773,29 @@ pub(in crate::calculation) enum ArrayEvaluator {
     XLookup,
 }
 
+impl ArrayEvaluator {
+    /// Whether the evaluator takes arrays where the call contract takes values and answers element
+    /// by element, as `IF`, `IFERROR`, `IFNA`, and `INDEX` do, or reads them whole, as `TYPE` does,
+    /// rather than returning an array of its own.
+    pub(in crate::calculation) const fn reads_value_arrays(self) -> bool {
+        matches!(
+            self,
+            Self::Legacy(
+                LegacyArrayFunction::If
+                    | LegacyArrayFunction::IfError
+                    | LegacyArrayFunction::IfNa
+                    | LegacyArrayFunction::Index
+            ) | Self::Type
+        )
+    }
+}
+
 #[cfg(test)]
 impl ArrayEvaluator {
     pub(super) fn stable_name(self) -> String {
         match self {
             Self::Legacy(value) => format!("legacy:{}", value.stable_name()),
-            Self::Information(value) => format!("information:{}", value.stable_name()),
-            Self::Elementwise(value) => format!("elementwise:{}", value.stable_name()),
+            Self::Type => "information:type".to_owned(),
             Self::Dynamic(value) => format!("dynamic:{}", value.stable_name()),
             Self::Map => "map".to_owned(),
             Self::Array(value) => format!("array:{}", value.stable_name()),
@@ -841,18 +809,7 @@ impl ArrayEvaluator {
     pub(super) fn all() -> Vec<Self> {
         let mut evaluators = Vec::new();
         evaluators.extend(LegacyArrayFunction::ALL.iter().copied().map(Self::Legacy));
-        evaluators.extend(
-            InformationArrayFunction::ALL
-                .iter()
-                .copied()
-                .map(Self::Information),
-        );
-        evaluators.extend(
-            ElementwiseArrayFunction::ALL
-                .iter()
-                .copied()
-                .map(Self::Elementwise),
-        );
+        evaluators.push(Self::Type);
         evaluators.extend(DynamicArrayFunction::ALL.iter().copied().map(Self::Dynamic));
         evaluators.push(Self::Map);
         evaluators.extend(ArrayFunction::ALL.iter().copied().map(Self::Array));
