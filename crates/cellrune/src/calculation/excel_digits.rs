@@ -270,6 +270,9 @@ const EXCEL_SIGNIFICANT_DIGITS: usize = 15;
 fn fifteen_digit_text(value: f64) -> DecimalText {
     let mut text = DecimalText::default();
     write!(text, "{value:.14e}").expect("a finite double fits the buffer");
+    if !(EXACT_TIE_MAGNITUDES.contains(&value.abs())) {
+        return text;
+    }
     let last = text
         .as_str()
         .find('e')
@@ -287,10 +290,12 @@ fn fifteen_digit_text(value: f64) -> DecimalText {
     if sixteen.bytes[exponent_start - 1] != b'5' {
         return text;
     }
-    // The tie is exact only when no digit past the sixteenth is nonzero; a double has at most 767
-    // significant digits.
-    let exact = format!("{value:.766e}");
+    // The tie is exact only when no digit past the sixteenth is nonzero; a double in the range of
+    // exact ties has at most 97 significant digits.
+    let mut exact = DecimalText::default();
+    write!(exact, "{value:.100e}").expect("a finite double fits the buffer");
     let (digits, _) = exact
+        .as_str()
         .split_once('e')
         .expect("scientific formatting writes an exponent");
     // `d.` and the fifteen digits after the point come first.
@@ -307,6 +312,79 @@ fn fifteen_digit_text(value: f64) -> DecimalText {
     write!(toward_zero, "{}{exponent}", &mantissa[..mantissa.len() - 1])
         .expect("the digits fit the buffer");
     toward_zero
+}
+
+/// The magnitudes a double can hold an exact sixteen-digit tie in. A tie is `N·10^q` with `N` a
+/// sixteen-digit odd multiple of 5: below `10^-7` it needs `5^-q` to divide `N`, which no `q`
+/// below -22 allows, and from `10^17` its odd part passes 2^53. Such a double has at most 79
+/// binary places after the point, so 97 significant digits write it exactly.
+const EXACT_TIE_MAGNITUDES: std::ops::Range<f64> = 1e-8..1e17;
+
+/// The numbers that round to the same fifteen significant digits as a number, and so are
+/// [`approximately_equal`] to it, as one interval of doubles: computed once, it compares a
+/// criterion with many cells without writing each cell's digits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FifteenDigitBucket {
+    low: f64,
+    high: f64,
+}
+
+impl FifteenDigitBucket {
+    pub(super) fn of(value: f64) -> Self {
+        if value == 0.0 || !value.is_finite() {
+            return Self {
+                low: value,
+                high: value,
+            };
+        }
+        let rounded = fifteen_significant_digits(value);
+        let same = |other: f64| fifteen_significant_digits(other) == rounded;
+        // The midpoints next to the fifteen-digit value bound the interval; the doubles nearest
+        // to them are then moved to the last ones that round to it.
+        let text = fifteen_digit_text(value.abs());
+        let (mantissa, exponent) = text
+            .as_str()
+            .split_once('e')
+            .expect("scientific formatting writes an exponent");
+        let units: u64 = mantissa.replace('.', "").parse().expect("formatted digits");
+        let exponent: i32 = exponent.parse().expect("formatted exponent");
+        let midpoint = |numerator: u64| -> f64 {
+            format!("{numerator}e{}", exponent - 15)
+                .parse::<f64>()
+                .expect("formatted midpoint")
+                .copysign(value)
+        };
+        // Near the largest double a midpoint passes the range, as the rounding itself may.
+        let finite = |bound: f64| bound.clamp(-f64::MAX, f64::MAX);
+        let mut low = finite(midpoint(units * 10 - 5));
+        let mut high = finite(midpoint(units * 10 + 5));
+        if low > high {
+            (low, high) = (high, low);
+        }
+        while !same(low) {
+            low = low.next_up();
+        }
+        while low.next_down().is_finite() && same(low.next_down()) {
+            low = low.next_down();
+        }
+        while !same(high) {
+            high = high.next_down();
+        }
+        while high.next_up().is_finite() && same(high.next_up()) {
+            high = high.next_up();
+        }
+        Self { low, high }
+    }
+
+    /// Whether `other` rounds to the same fifteen significant digits.
+    pub(super) fn contains(self, other: f64) -> bool {
+        self.low <= other && other <= self.high
+    }
+
+    /// The least and greatest numbers in the interval.
+    pub(super) const fn bounds(self) -> (f64, f64) {
+        (self.low, self.high)
+    }
 }
 
 /// Returns the double nearest to `value` written with fifteen significant digits.
@@ -375,6 +453,59 @@ mod tests {
         );
         assert_eq!(general_text(1_234_567_890_123_475.0), "1234567890123470");
         assert_eq!(general_text(123_456_789_012_344.5), "123456789012344");
+    }
+
+    #[test]
+    fn a_fifteen_digit_bucket_holds_exactly_the_approximately_equal_numbers() {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut values = vec![
+            0.3,
+            0.1 + 0.2,
+            1.0,
+            1e15,
+            999_999_999_999_999.6,
+            1_234_567_890_123_455.0,
+            1.234_567_890_123_464_5e-300,
+            f64::MAX,
+            -f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            -0.3,
+        ];
+        for _ in 0..2_000 {
+            let bits = next();
+            let value = f64::from_bits(bits);
+            if value.is_finite() {
+                values.push(value);
+            }
+        }
+        for value in values {
+            let bucket = FifteenDigitBucket::of(value);
+            let (low, high) = bucket.bounds();
+            for other in [
+                value,
+                low,
+                high,
+                low.next_down(),
+                high.next_up(),
+                value.next_up(),
+                value.next_down(),
+            ] {
+                if other.is_finite() {
+                    assert_eq!(
+                        bucket.contains(other),
+                        approximately_equal(other, value),
+                        "{value:e} {other:e}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

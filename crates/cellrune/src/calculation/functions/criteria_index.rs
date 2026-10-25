@@ -10,12 +10,12 @@
 //! changes.
 
 use std::cell::RefMut;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::super::criteria::{CompiledCriteria, ExactCriterion, criterion_number_ordering};
+use super::super::criteria::{CompiledCriteria, ExactCriterion};
 use super::super::eval::{Engine, EvalContext};
+use super::super::excel_digits::FifteenDigitBucket;
 use super::super::runtime::{CellId, Rect};
 use super::super::value::{ErrorKind, Value};
 use super::lookup_index::{EqualityKey, LookupIndexCache, lowercase};
@@ -276,9 +276,9 @@ impl CriteriaIndex {
         match criterion {
             ExactCriterion::Number {
                 number,
-                approximate,
+                equal_numbers,
             } => (
-                self.matching_numbers(*number, *approximate),
+                self.matching_numbers(*number, *equal_numbers),
                 Some(&self.texts),
             ),
             ExactCriterion::Text(text) => (
@@ -294,27 +294,17 @@ impl CriteriaIndex {
 }
 
 impl CriteriaIndex {
-    /// The ascending offsets of the cells whose number equals `number`, or with `approximate`
-    /// differs from it only past the fifteenth significant digit.
-    fn matching_numbers(&self, number: f64, approximate: bool) -> Vec<u32> {
+    /// The ascending offsets of the cells whose number equals `number`, or lies in
+    /// `equal_numbers`, the interval of numbers equal to it to fifteen significant digits.
+    fn matching_numbers(&self, number: f64, equal_numbers: Option<FifteenDigitBucket>) -> Vec<u32> {
         if number.is_nan() {
             return Vec::new();
         }
-        // Approximately equal numbers differ by less than `5e-15` of the smaller magnitude, so
-        // every candidate lies within this margin of `number`.
-        let margin = if approximate {
-            number.abs() * 1e-14
-        } else {
-            0.0
-        };
-        let (low, high) = (number - margin, number + margin);
+        let (low, high) = equal_numbers.map_or((number, number), FifteenDigitBucket::bounds);
         let first = self.numbers.partition_point(|(value, _)| *value < low);
         let mut offsets = self.numbers[first..]
             .iter()
             .take_while(|(value, _)| *value <= high)
-            .filter(|(value, _)| {
-                criterion_number_ordering(*value, number, approximate) == Some(Ordering::Equal)
-            })
             .map(|(_, offset)| *offset)
             .collect::<Vec<_>>();
         offsets.sort_unstable();

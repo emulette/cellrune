@@ -487,8 +487,8 @@ pub enum ArithmeticSemantics {
     /// to the totals of `SUM`, `AVERAGE`, `AVERAGEA`, `SUBTOTAL`, and `AGGREGATE`, its
     /// fifteen-digit comparison in the comparison operators, `SWITCH`, and `COUNTIF`-style and
     /// database criteria, and its fifteen-digit rounding in `ROUND`, `ROUNDUP`, `ROUNDDOWN`,
-    /// `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms, `ISO.CEILING`,
-    /// `PERCENTRANK`, `TEXT`, `FIXED`, and `DOLLAR`.
+    /// `TRUNC`, `INT`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms,
+    /// `ISO.CEILING`, `PERCENTRANK`, `TEXT`, `FIXED`, and `DOLLAR`.
     #[default]
     ExcelNearZero,
     /// Use the IEEE-754 values unchanged in those places: no correction, exact comparison, and

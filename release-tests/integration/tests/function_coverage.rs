@@ -471,6 +471,12 @@ fn rounding_reads_the_scaled_quotient_to_fifteen_significant_digits() {
             0.0,
             0.0,
         ),
+        // INT reads fifteen digits as TRUNC does; QUOTIENT, EVEN, and ODD do not.
+        number("INT(0.3/0.1)", 3.0, 0.0),
+        number("INT(1-1E-16)", 1.0, 0.0),
+        number("INT(-0.3/0.1)", -3.0, 0.0),
+        number("QUOTIENT(0.3,0.1)", 2.0, 0.0),
+        number("EVEN(2+4E-16)", 4.0, 0.0),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 
@@ -652,6 +658,7 @@ fn ieee754_rounding_keeps_the_binary_quotient() {
         number("CEILING(0.1+0.2,0.1)", 0.4, 0.0),
         number("MROUND(0.285,0.01)", 0.28, 0.0),
         number("FLOOR(0.3,0.1)", 0.2, 0.0),
+        number("INT(0.3/0.1)", 2.0, 0.0),
         number(
             "PERCENTRANK.INC({1,2,3,4,5,6,7,8,9,10,11},3.3,3)",
             0.229,

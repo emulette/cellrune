@@ -1761,7 +1761,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   operators, `SWITCH`, and `COUNTIF`-style and database criteria
   (`=0.1+0.2=0.3` and `=1=1+4E-15` are `TRUE`, `=1+4E-15=1+6E-15` is
   `FALSE`), and reads a number to fifteen digits before rounding in `ROUND`,
-  `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `MROUND`, `CEILING`, `FLOOR` and their
+  `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `INT`, `MROUND`, `CEILING`, `FLOOR` and their
   variants, `PERCENTRANK`, `TEXT`, `FIXED`, and `DOLLAR` (`ROUND(1.005,2)` is
   `1.01`); lookups, sorting, and `UNIQUE` keep exact equality. `Ieee754`
   compares and rounds the binary values. Fifteen-digit rounding takes a tie

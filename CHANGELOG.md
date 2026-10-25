@@ -13,10 +13,11 @@ inventories, and measurements belong in the linked documentation rather than in 
 ### Changed
 
 - Under the default `ArithmeticSemantics::ExcelNearZero`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`,
-  `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms, `ISO.CEILING`, and
-  `PERCENTRANK` read the scaled quotient to fifteen significant digits before rounding, as Excel
-  does: `ROUND(1.005,2)` is `1.01`, `ROUNDDOWN(1.15,2)` is `1.15`, and `ROUNDUP(0.1+0.2,1)` is
-  `0.3` where they were `1`, `1.14`, and `0.4`. A quotient that ties past its fifteenth digit
+  `TRUNC`, `INT`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms,
+  `ISO.CEILING`, and `PERCENTRANK` read the scaled quotient to fifteen significant digits before rounding, as Excel
+  does: `ROUND(1.005,2)` is `1.01`, `ROUNDDOWN(1.15,2)` is `1.15`, `ROUNDUP(0.1+0.2,1)` is `0.3`,
+  and `INT(0.3/0.1)` is `3` where they were `1`, `1.14`, `0.4`, and `2`. `QUOTIENT`, `EVEN`, and
+  `ODD` keep the binary value, as Excel does. A quotient that ties past its fifteenth digit
   reads toward zero, as in Excel, so `ROUND(1234567890123470+5,-1)` is `1234567890123470`. A
   place past the fifteenth significant digit leaves the value unchanged, so
   `ROUND(1.23456789012345E+20,-2)` keeps every bit. In either mode a place past the range of a
@@ -134,8 +135,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   its text section passes 255 units. Conditions in the number sections no longer make
   the display text of a text cell unsupported, and a last section holding `@` formats it. Wrap the
   value in `VALUE` to keep the old `#VALUE!` for text.
-- The `excel_near_zero` interop value of `arithmetic_semantics`, and `ArithmeticSemantics::ExcelNearZero`,
-  keep their names while selecting all of the fifteen-digit rules above: near-zero correction,
+- The `excel_near_zero` interop value of `arithmetic_semantics`, and
+  `ArithmeticSemantics::ExcelNearZero`, keep their names while selecting all of the fifteen-digit rules above: near-zero correction,
   comparison, and rounding. The interop schema versions are unchanged because no key or value
   changes form.
 

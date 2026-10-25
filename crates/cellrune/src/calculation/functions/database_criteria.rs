@@ -2,8 +2,9 @@ use std::cmp::Ordering;
 
 use super::super::coerce::compare_text_case_insensitive;
 use super::super::criteria::{
-    CompiledWildcardPattern, charge_text_comparison, criterion_number_ordering,
+    CompiledWildcardPattern, charge_text_comparison, criterion_number_ordering, equal_numbers,
 };
+use super::super::excel_digits::FifteenDigitBucket;
 use super::super::numeric_text::NumericText;
 use super::super::value::{ErrorKind, Value};
 
@@ -32,8 +33,8 @@ enum DatabaseCriteriaRhs {
 pub(super) struct CompiledDatabaseCriteria {
     op: DatabaseCriteriaOp,
     rhs: DatabaseCriteriaRhs,
-    /// Whether a number criterion compares as the comparison operators do.
-    approximate: bool,
+    /// The numbers equal to a number criterion when it compares as the comparison operators do.
+    equal_numbers: Option<FifteenDigitBucket>,
     /// How a text cell reads as the number an equality criterion compares it to.
     numeric_text: NumericText,
 }
@@ -77,10 +78,14 @@ impl CompiledDatabaseCriteria {
                 (op, rhs)
             }
         };
+        let equal_numbers = match rhs {
+            DatabaseCriteriaRhs::Number(number) => equal_numbers(number, approximate),
+            _ => None,
+        };
         Ok(Self {
             op,
             rhs,
-            approximate,
+            equal_numbers,
             numeric_text,
         })
     }
@@ -129,7 +134,7 @@ impl CompiledDatabaseCriteria {
                     _ => None,
                 };
                 Ok(actual.is_some_and(|actual| {
-                    criterion_number_ordering(actual, *expected, self.approximate)
+                    criterion_number_ordering(actual, *expected, self.equal_numbers)
                         == Some(Ordering::Equal)
                 }))
             }
@@ -159,7 +164,7 @@ impl CompiledDatabaseCriteria {
             // As in COUNTIF, a number orders only number cells.
             DatabaseCriteriaRhs::Number(expected) => Ok(match cell {
                 Value::Number(actual) => {
-                    criterion_number_ordering(*actual, *expected, self.approximate)
+                    criterion_number_ordering(*actual, *expected, self.equal_numbers)
                         .is_some_and(accept)
                 }
                 _ => false,

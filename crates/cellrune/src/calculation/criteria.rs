@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use super::coerce::compare_text_case_insensitive;
-use super::excel_digits::approximately_equal;
+use super::excel_digits::FifteenDigitBucket;
 use super::numeric_text::NumericText;
 use super::value::{ErrorKind, Value};
 
@@ -29,25 +29,33 @@ enum CompiledCriteriaRhs {
 pub struct CompiledCriteria {
     op: CriteriaOp,
     rhs: CompiledCriteriaRhs,
-    /// Whether a number criterion treats numbers that differ only past their fifteenth significant
-    /// digit as equal, as the comparison operators do.
-    approximate: bool,
+    /// The numbers equal to a number criterion when it compares as the comparison operators do,
+    /// to fifteen significant digits; `None` compares exactly.
+    equal_numbers: Option<FifteenDigitBucket>,
     /// How a text cell reads as the number an equality criterion compares it to; `None` for a
     /// lookup's equality, under which a number equals number cells only.
     numeric_text: Option<NumericText>,
 }
 
-/// Orders a cell's number against a criterion's number. With `approximate`, numbers that differ
-/// only past their fifteenth significant digit are equal. `None` when either is not a number.
+/// Orders a cell's number against a criterion's number; the numbers in `equal_numbers` are equal
+/// to it. `None` when either is not a number.
 pub(in crate::calculation) fn criterion_number_ordering(
     actual: f64,
     expected: f64,
-    approximate: bool,
+    equal_numbers: Option<FifteenDigitBucket>,
 ) -> Option<Ordering> {
-    if approximate && approximately_equal(actual, expected) {
+    if equal_numbers.is_some_and(|bucket| bucket.contains(actual)) {
         return Some(Ordering::Equal);
     }
     actual.partial_cmp(&expected)
+}
+
+/// The numbers equal to `number` to fifteen significant digits when `approximate`.
+pub(in crate::calculation) fn equal_numbers(
+    number: f64,
+    approximate: bool,
+) -> Option<FifteenDigitBucket> {
+    approximate.then(|| FifteenDigitBucket::of(number))
 }
 
 /// Compiles a COUNTIF-style criterion. `approximate` makes a number criterion compare as the
@@ -60,10 +68,14 @@ pub fn compile_criteria_with_work(
     on_work: impl FnMut(u64) -> Result<(), ErrorKind>,
 ) -> Result<CompiledCriteria, ErrorKind> {
     let (op, rhs) = compile_operator_and_value(value, numeric_text, on_work)?;
+    let equal_numbers = match rhs {
+        CompiledCriteriaRhs::Number(number) => equal_numbers(number, approximate),
+        _ => None,
+    };
     Ok(CompiledCriteria {
         op,
         rhs,
-        approximate,
+        equal_numbers,
         numeric_text: Some(numeric_text),
     })
 }
@@ -134,7 +146,7 @@ impl CompiledCriteria {
         Ok(Some(Self {
             op: CriteriaOp::Eq,
             rhs,
-            approximate: false,
+            equal_numbers: None,
             numeric_text: None,
         }))
     }
@@ -187,7 +199,7 @@ impl CompiledCriteria {
                     _ => None,
                 };
                 Ok(actual.is_some_and(|actual| {
-                    criterion_number_ordering(actual, *expected, self.approximate)
+                    criterion_number_ordering(actual, *expected, self.equal_numbers)
                         == Some(Ordering::Equal)
                 }))
             }
@@ -218,7 +230,7 @@ impl CompiledCriteria {
             // 16.114).
             CompiledCriteriaRhs::Number(expected) => Ok(match cell {
                 Value::Number(actual) => {
-                    criterion_number_ordering(*actual, *expected, self.approximate)
+                    criterion_number_ordering(*actual, *expected, self.equal_numbers)
                         .is_some_and(accept)
                 }
                 _ => false,
@@ -254,7 +266,7 @@ impl CompiledCriteria {
         match &self.rhs {
             CompiledCriteriaRhs::Number(number) => Some(ExactCriterion::Number {
                 number: *number,
-                approximate: self.approximate,
+                equal_numbers: self.equal_numbers,
             }),
             CompiledCriteriaRhs::EqualityText(pattern) => {
                 pattern.literal().map(ExactCriterion::Text)
@@ -275,11 +287,10 @@ impl CompiledCriteria {
 /// The value an exact-equality criterion matches; see [`CompiledCriteria::exact_value`].
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::calculation) enum ExactCriterion {
-    /// A number; with `approximate`, cells whose numbers differ from it only past their fifteenth
-    /// significant digit match too.
+    /// A number; the cells whose numbers lie in `equal_numbers` match too.
     Number {
         number: f64,
-        approximate: bool,
+        equal_numbers: Option<FifteenDigitBucket>,
     },
     /// The case-folded characters a text cell must hold.
     Text(String),

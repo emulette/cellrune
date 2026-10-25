@@ -180,7 +180,7 @@ default:
   the correction of a formula's root or an aggregate's total makes a residue zero.
 - Sorting, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `LOOKUP`, `UNIQUE`, `GROUPBY`, and `MODE`
   keep exact order and equality.
-- `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and
+- `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `INT`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and
   `.PRECISE` forms, `ISO.CEILING`, and `PERCENTRANK` read the scaled quotient to fifteen
   significant digits, a tie toward zero, before rounding it, so `ROUND(1.005,2)` is `1.01` and `ROUNDDOWN(1.15,2)`
   is `1.15`. The product is not snapped again: `FLOOR(0.3,0.1)` is three units of `0.1`,

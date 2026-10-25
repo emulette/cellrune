@@ -18,7 +18,14 @@ pub(super) fn call(
             super::array::mdeterm(engine, context, args).map_or_else(Value::Error, Value::Number)
         }
         MathFunction::Abs => unary(engine, context, args, f64::abs),
-        MathFunction::Int => unary(engine, context, args, f64::floor),
+        // `INT` reads the number to fifteen significant digits, as `TRUNC` does: `INT(0.3/0.1)` is
+        // 3 and `INT(1-1E-16)` is 1 (Mac Excel 16.114).
+        MathFunction::Int => {
+            let decimal = fifteen_digit_rules(engine);
+            unary(engine, context, args, |number| {
+                round_quotient(number, Rounding::Down, decimal)
+            })
+        }
         MathFunction::Sign => unary(engine, context, args, excel_sign),
         MathFunction::Exp => unary(engine, context, args, f64::exp),
         MathFunction::Ln => unary_checked(engine, context, args, |number| {

@@ -1,4 +1,4 @@
-use super::super::super::criteria::ExactCriterion;
+use super::super::super::criteria::{ExactCriterion, equal_numbers};
 use super::super::super::eval::Engine;
 use super::super::lookup_index::LookupIndexCache;
 use crate::{
@@ -100,7 +100,7 @@ fn an_index_matches_numbers_to_fifteen_digits_only_when_the_criterion_does() {
         index
             .matching(&ExactCriterion::Number {
                 number: 0.3,
-                approximate,
+                equal_numbers: equal_numbers(0.3, approximate),
             })
             .0
     };
