@@ -1,8 +1,9 @@
 //! The two numeric compatibility axes, shown by calculating the same cells under both settings.
 //!
-//! Both default to matching Excel rather than to what releases up to 0.1.2 did, so upgrading
-//! changes calculated numbers unless the 0.1.2 policies are selected explicitly. This example
-//! builds its own workbook so the difference is visible without an input file.
+//! Both default to matching Excel. `ArithmeticSemantics::Ieee754` keeps binary values where Excel
+//! applies its fifteen-digit rules, and `FinancialSolverSemantics::ExtendedSearch` searches as
+//! releases up to 0.1.2 did. This example builds its own workbook so the difference is visible
+//! without an input file.
 
 use std::error::Error;
 
@@ -12,18 +13,19 @@ use cellrune::{
     WorkbookDraft, calculate_workbook,
 };
 
-/// Formulas that expose Excel's narrow correction boundary, plus one real difference.
+/// Formulas that show Excel's fifteen-digit rules.
 ///
-/// The first group is corrected, the sixth row cancels exactly but lies outside Excel's observed
-/// binary boundary, and the last row is a real difference that must not be swallowed.
+/// Excel corrects the root subtraction and the `SUM` total but not a parenthesized formula or
+/// `SUMPRODUCT`, and only below eight units in the last place (`100.1-100-0.1` keeps its residue).
+/// It compares and rounds numbers by their fifteen significant digits.
 const ARITHMETIC: &[(&str, &str)] = &[
     ("A1", "=0.1+0.2-0.3"),
     ("A2", "=SUM(0.1,0.2,-0.3)"),
-    ("A3", "=SUMPRODUCT({0.1,0.2,-0.3})"),
-    ("A4", "=NPV(0.1,11,-12.1)"),
-    ("A5", "=(0.1+0.2-0.3)=0"),
-    ("A6", "=100.1-100-0.1"),
-    ("A7", "=100.1-100-0.099999999999999"),
+    ("A3", "=(0.1+0.2-0.3)"),
+    ("A4", "=SUMPRODUCT({0.1,0.2,-0.3})"),
+    ("A5", "=100.1-100-0.1"),
+    ("A6", "=0.1+0.2=0.3"),
+    ("A7", "=ROUND(1.005,2)"),
 ];
 
 /// An `IRR` whose answer depends on how long the solver is allowed to search.
@@ -42,7 +44,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Defaults on both axes. Nothing has to be selected to match Excel.
     let excel = CalculationOptions::default();
-    // What 0.1.2 did, and what a caller who depended on those numbers should select.
+    // Binary values where Excel applies its fifteen-digit rules, and the longer solver search.
     let legacy = CalculationOptions::default()
         .with_arithmetic_semantics(ArithmeticSemantics::Ieee754)
         .with_financial_solver_semantics(FinancialSolverSemantics::ExtendedSearch);
@@ -50,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let excel_results = calculate_workbook(draft.workbook(), excel);
     let legacy_results = calculate_workbook(draft.workbook(), legacy);
 
-    println!("{:<34} {:<26} 0.1.2 opt-in", "formula", "default (Excel)");
+    println!("{:<34} {:<26} opt-in", "formula", "default (Excel)");
     for (address, formula) in ARITHMETIC.iter().chain(SOLVER) {
         let cell = CalculationCellId::new(sheet_id, CellAddress::from_a1(address)?);
         println!(
@@ -62,10 +64,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!();
     println!(
-        "The correction requires both exact cancellation and Excel's observed relative binary \
-         boundary. The final two arithmetic rows are therefore identical under both policies. \
-         Compare calculated numbers with a tolerance rather than for equality under either one; \
-         see docs/NUMERICS.md."
+        "Excel corrects only a formula's root and an aggregate's total, so the third to fifth rows \
+         keep their residue under both policies. Compare calculated numbers with a tolerance \
+         rather than for equality under either one; see docs/NUMERICS.md."
     );
     Ok(())
 }

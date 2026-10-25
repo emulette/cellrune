@@ -23,6 +23,40 @@ const MAX_MAGNITUDE: f64 = 1e308;
 /// Seconds in a day.
 const DAY_SECONDS: f64 = 86_400.0;
 
+/// The words, in lowercase, Excel may read within a number, a date, or a time: an exponent, the
+/// halves of the day, and the English month names and their abbreviations.
+const NUMBER_WORDS: [&str; 29] = [
+    "e",
+    "a",
+    "p",
+    "am",
+    "pm",
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "may",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "oct",
+    "nov",
+    "dec",
+    "january",
+    "february",
+    "march",
+    "april",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+];
+
 /// How text reads as a number: the locale's conventions and the workbook's date system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::calculation) struct NumericText {
@@ -49,6 +83,40 @@ impl NumericText {
     pub(in crate::calculation) fn number(self, text: &str) -> Option<f64> {
         let text = text.trim_matches(' ');
         signed_number(text, self.locale.currency_symbol()).or_else(|| self.read_date_time(text))
+    }
+
+    /// Whether Excel may read `text`, which [`Self::number`] leaves unread, as a number: text that
+    /// holds a digit and nothing but the characters of numbers, dates, and times (`1/2`, `12:99`,
+    /// `1,0000`, `2:30 p`) or month names (`Jan 2, 2024`, `15-Jan-2024`). Excel reads those as
+    /// numbers (`TEXT("1/2","mm-dd")` is `01-02`, Mac Excel 16.114) while it keeps `Jan`, `abc`,
+    /// and `2024년 1월 15일` as text, so a caller that would show such text as written reports it as
+    /// unsupported instead.
+    pub(in crate::calculation) fn may_read_otherwise(self, text: &str) -> bool {
+        let text = text.trim_matches(' ');
+        if !text.bytes().any(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        let currency = self.locale.currency_symbol();
+        let mut rest = text;
+        while let Some(character) = rest.chars().next() {
+            if character.is_ascii_alphabetic() {
+                let end = rest
+                    .find(|character: char| !character.is_ascii_alphabetic())
+                    .unwrap_or(rest.len());
+                let word = rest[..end].to_ascii_lowercase();
+                if !NUMBER_WORDS.contains(&word.as_str()) {
+                    return false;
+                }
+                rest = &rest[end..];
+            } else if let Some(after) = rest.strip_prefix(currency) {
+                rest = after;
+            } else if character.is_ascii_digit() || " ,.:/-+%()".contains(character) {
+                rest = &rest[1..];
+            } else {
+                return false;
+            }
+        }
+        true
     }
 
     /// The serial of a date, a time of day, or a date and a time, as `DATEVALUE` and `TIMEVALUE`

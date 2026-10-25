@@ -6274,12 +6274,12 @@ fn single_cell_legacy_array_metadata_uses_array_root_evaluation() {
     assert_number(&calculation, 2, 9.0, 0.0);
 }
 
-/// A cell an array formula materializes over no longer holds the literal underneath it, and the
-/// near-zero policy must read its exact decimal from the same place it reads its value.
+/// A cell an array formula materializes over no longer holds the literal underneath it, so the
+/// near-zero correction of a total sees only the materialized values.
 ///
 /// Here `B1` and `C1` carry literals that cancel exactly while the array puts `2` and `3` on top of
-/// them. Taking the decimals from the literals proves a cancellation that the summed values never
-/// performed, and `=SUM(B1:C1)` collapses from `5` to `0`.
+/// them. Reading the literals would correct a cancellation the summed values never performed, and
+/// `=SUM(B1:C1)` would collapse from `5` to `0`.
 #[test]
 fn literals_under_an_array_formula_do_not_supply_the_near_zero_decision() {
     let sheet_id = SheetId::new(1).expect("valid sheet ID");

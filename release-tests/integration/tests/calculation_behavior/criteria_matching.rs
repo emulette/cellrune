@@ -386,8 +386,11 @@ fn ieee754_comparisons_keep_exact_equality() {
         (8, 0.0),
         (9, 0.0),
         (10, 0.0),
+        (11, 1.0),
         (12, 1.0),
+        (13, 1.0),
         (14, 0.0),
+        (15, 0.0),
     ] {
         assert_number(&calculation, column, expected, 0.0);
     }

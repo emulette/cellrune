@@ -76,8 +76,8 @@
 //! - [`FinancialSolverSemantics`] decides whether `IRR`, `XIRR`, and `RATE` stop at the iteration
 //!   budget Microsoft documents, or search longer and return values where Excel reports `#NUM!`.
 //!
-//! [`ArithmeticSemantics::Ieee754`] and [`FinancialSolverSemantics::ExtendedSearch`] select what
-//! releases up to 0.1.2 did in those two places.
+//! [`ArithmeticSemantics::Ieee754`] keeps the binary values in those places, and
+//! [`FinancialSolverSemantics::ExtendedSearch`] searches as releases up to 0.1.2 did.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]

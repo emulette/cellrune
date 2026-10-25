@@ -18,10 +18,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   does: `ROUND(1.005,2)` is `1.01`, `ROUNDDOWN(1.15,2)` is `1.15`, and `ROUNDUP(0.1+0.2,1)` is
   `0.3` where they were `1`, `1.14`, and `0.4`. A quotient that ties past its fifteenth digit
   reads toward zero, as in Excel, so `ROUND(1234567890123470+5,-1)` is `1234567890123470`. A
-  place past the fifteenth significant digit leaves the value unchanged, so `ROUND(1,400)` is `1`,
-  `ROUND(1E307,2)` is `1E307` instead of `#NUM!`, and `ROUND(1.23456789012345E+20,-2)` keeps every
-  bit; a negative digit count past the range of a double rounds to `0`, or `#NUM!` for `ROUNDUP`,
-  in either mode. Select `ArithmeticSemantics::Ieee754` to round the binary quotient as before.
+  place past the fifteenth significant digit leaves the value unchanged, so
+  `ROUND(1.23456789012345E+20,-2)` keeps every bit. In either mode a place past the range of a
+  double leaves the value unchanged, so `ROUND(1,400)` is `1` and `ROUND(1E307,2)` is `1E307`
+  instead of `#NUM!`, and a negative digit count past that range rounds to `0`, or `#NUM!` for
+  `ROUNDUP`. Select `ArithmeticSemantics::Ieee754` to round the binary quotient otherwise.
 - Under the default `ArithmeticSemantics::ExcelNearZero`, the comparison operators, `SWITCH`, and
   the criteria of `COUNTIF(S)`, `SUMIF(S)`, `AVERAGEIF(S)`, `MAXIFS`, `MINIFS`, and the database
   functions treat numbers as equal when they round to the same fifteen significant digits, as
@@ -66,7 +67,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   such text compares it as text: `COUNTIF(A1:A3,">=1/2")` counts no date cell, where Excel counts
   the dates from January 2 of the current year. `VALUE` and `FIXED` read only the locale's currency
   symbol, so under the default `Locale::EnUs` `VALUE("₩5")` is `#VALUE!` where it was `5`, and
-  `€`, `£`, and `¥` no longer read. Either `ArithmeticSemantics` reads text this way; text that
+  `€`, `£`, and `¥` no longer read. Text the old reader took in forms Excel does not read is
+  `#VALUE!`: a sign inside parentheses (`"(-5)"` read as `5`), a currency symbol with a percent
+  sign (`"$5%"`), a magnitude of `1E+308` or more or one that underflows (`"1E-400"` read as `0`),
+  and a thousands group starting with `0` (`"01,000"`). Either `ArithmeticSemantics` reads text
+  this way; text that
   must stay text in arithmetic now needs an explicit check such as `ISNUMBER(VALUE(x))`.
 - `DATEVALUE` and `TIMEVALUE` read those dates and times and a date followed by a time, returning
   the serial's whole day and its fraction: `DATEVALUE("2024/02/29")` is `45351` and
@@ -85,8 +90,10 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `AND`, `OR`, and `XOR` skip text other than `TRUE` and `FALSE` in a direct argument, typed or
   computed, and every text in a referenced cell, as Excel does: `AND("0",1)` and `AND("x",1)` are
   `TRUE` where they were `FALSE` and `#VALUE!`, and with A1 holding the text `x`, `AND(A1,TRUE)`,
-  `OR(A1,FALSE)`, and `XOR(A1,TRUE)` return a logical value instead of `#VALUE!`. With no number
-  or logical value left they stay `#VALUE!`.
+  `OR(A1,FALSE)`, and `XOR(A1,TRUE)` return a logical value instead of `#VALUE!`. A referenced
+  cell holding the text `TRUE` or `FALSE` no longer counts, so `AND(A2)` with A2 holding the text
+  `TRUE` is `#VALUE!` instead of `TRUE`. With no number or logical value left they are `#VALUE!`;
+  store logical values as logical values to count them.
 - `^` and `POWER` return `#DIV/0!` instead of `#NUM!` for zero raised to a negative power, and
   give the odd root of a negative base whose fractional exponent has an odd whole reciprocal, read
   to fifteen significant digits: `(-8)^(1/3)` is `-(8^(1/3))`, `-2`, instead of `#NUM!`, while
@@ -100,7 +107,7 @@ inventories, and measurements belong in the linked documentation rather than in 
   `TEXT(1.005,"0.00")` and `FIXED(1.005,2)` are `1.01` and `TEXT(0.285,"0%")` is `29%` where they
   were `1.00` and `28%`. Numbers of 2^53 or more rounded units show their fifteen significant
   digits followed by zeros (`TEXT(2^60,"0")` is `1152921504606850000`) instead of `#NUM!` or
-  unsupported, and a tie past the fifteenth digit rounds toward zero (`TEXT(1234567890123455,"0")`
+  unsupported, and a tie past the fifteenth digit rounds toward zero (`TEXT(1234567890123450+5,"0")`
   is `1234567890123450`). A result longer than 255 UTF-16 code units, a positive `DOLLAR` result
   of 255, and a code with more than 127 decimal placeholders in any section are `#VALUE!`. Select
   `ArithmeticSemantics::Ieee754` to round the binary value, now from its exact decimal expansion,
@@ -118,8 +125,13 @@ inventories, and measurements belong in the linked documentation rather than in 
   0.1.26 results need the Excel ones.
 - `TEXT` formats text that does not read as a number, and logical values, with the code's text
   section, as Excel does: `TEXT("abc","0.00")` is `abc` and `TEXT(TRUE,"0")` is `TRUE` instead of
-  `#VALUE!` and `1`. `@` in a section other than the last, `General`, and a fourth section with
-  digits or a condition are `#VALUE!` for them. Conditions in the number sections no longer make
+  `#VALUE!` and `1`. `@` in a section other than the last, `General`, a fourth section with
+  digits or a condition, and a result past 255 UTF-16 code units are `#VALUE!` for them. Text
+  Excel reads as a number in a form CellRune leaves unread, such as `"1/2"`, `"Jan 2, 2024"`, and
+  `"12:99"`, is `calculation.unsupported_expression` in `TEXT` rather than shown as written. An
+  error in the value comes before one in the format (`TEXT(1/0,NA())` is `#DIV/0!`, as in
+  0.1.27). The display text of a text cell is unsupported when its code is one `TEXT` rejects or
+  its text section passes 255 units. Conditions in the number sections no longer make
   the display text of a text cell unsupported, and a last section holding `@` formats it. Wrap the
   value in `VALUE` to keep the old `#VALUE!` for text.
 - The `excel_near_zero` interop value of `arithmetic_semantics`, and `ArithmeticSemantics::ExcelNearZero`,

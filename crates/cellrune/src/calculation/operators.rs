@@ -126,9 +126,7 @@ pub(super) fn broadcast_shape(left: &Array, right: &Array) -> Result<(u32, u32),
 /// Position an operand of the given shape contributes to `(row, col)` of a broadcast result.
 ///
 /// A singleton dimension repeats along that axis; a position the operand does not reach at all is
-/// `None`, which the callers surface as `#N/A` (values) or as an untraced element (decimals).
-/// Both the value and the decimal-trace side of the array path index through this one rule, so
-/// broadcasting cannot change for one of them without changing for the other.
+/// `None`, which the callers surface as `#N/A`.
 pub(super) const fn broadcast_index(rows: u32, cols: u32, row: u32, col: u32) -> Option<usize> {
     let source_row = if rows == 1 { 0 } else { row };
     let source_col = if cols == 1 { 0 } else { col };

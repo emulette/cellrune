@@ -492,8 +492,8 @@ pub enum ArithmeticSemantics {
     #[default]
     ExcelNearZero,
     /// Use the IEEE-754 values unchanged in those places: no correction, exact comparison, and
-    /// rounding of the binary value, as releases up to 0.1.2 did for the correction and releases
-    /// up to 0.1.27 did for comparison and rounding.
+    /// rounding of the binary value. A place past the range of a double leaves the value
+    /// unchanged in either mode.
     Ieee754,
 }
 

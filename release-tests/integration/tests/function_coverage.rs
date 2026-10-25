@@ -522,9 +522,12 @@ fn numbers_join_text_with_fifteen_digits_and_literals_keep_fifteen() {
 #[test]
 fn powers_and_logarithms_follow_excel_zero_and_odd_root_rules() {
     // Mac Excel 16.114: a negative base takes an exponent whose reciprocal is an odd whole number.
+    // The odd root is the negated power of the magnitude. Excel's own power is an ulp or so from
+    // the correctly rounded one (`(-8)^(1/3)` is -1.9999999999999998 there), which CellRune does
+    // not reproduce.
     let odd_root = |base: f64, exponent: f64| -(base.powf(exponent));
     let cases = [
-        number("(-8)^(1/3)", odd_root(8.0, 1.0 / 3.0), 0.0),
+        number("(-8)^(1/3)", -2.0, 0.0),
         number("POWER(-8,1/3)", odd_root(8.0, 1.0 / 3.0), 0.0),
         number("(-27)^(1/3)", odd_root(27.0, 1.0 / 3.0), 0.0),
         number("(-32)^0.2", odd_root(32.0, 0.2), 0.0),
@@ -644,8 +647,57 @@ fn ieee754_rounding_keeps_the_binary_quotient() {
     let cases = [
         number("ROUND(1.005,2)", 1.0, 0.0),
         number("ROUNDDOWN(1.15,2)", 1.14, 0.0),
+        number("TRUNC(1.15,2)", 1.14, 0.0),
+        number("ROUNDUP(0.1+0.2,1)", 0.4, 0.0),
+        number("CEILING(0.1+0.2,0.1)", 0.4, 0.0),
+        number("MROUND(0.285,0.01)", 0.28, 0.0),
         number("FLOOR(0.3,0.1)", 0.2, 0.0),
+        number(
+            "PERCENTRANK.INC({1,2,3,4,5,6,7,8,9,10,11},3.3,3)",
+            0.229,
+            0.0,
+        ),
+        number("ROUND(1234567890123470+5,-1)", 1_234_567_890_123_480.0, 0.0),
+        // A place past the range of a double leaves the value unchanged in either mode.
         number("ROUND(1,400)", 1.0, 0.0),
+        number("ROUND(1E+307,2)", 1e307, 0.0),
+        // Comparison is exact and the root correction is off.
+        logical("1=1+4E-15", false),
+        logical("0.1+0.2=0.3", false),
+        number("0.1+0.2-\"0.3\"", 0.1 + 0.2 - 0.3, 0.0),
+    ];
+    let workbook = workbook_with_formula_cases(&cases);
+
+    let calculation = calculate_workbook(
+        &workbook,
+        CalculationOptions::default().with_arithmetic_semantics(ArithmeticSemantics::Ieee754),
+    );
+    for (offset, case) in cases.iter().enumerate() {
+        assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
+fn ieee754_reads_and_writes_numbers_as_the_default_does() {
+    // Reading numbers from literals and text and writing them as text, and the 0.2.0 function
+    // semantics, do not depend on the arithmetic semantics.
+    let cases = [
+        text("2/3&\"\"", "0.666666666666667"),
+        text("1E+20&\"\"", "1E+20"),
+        text("1234567890123456&\"\"", "1234567890123450"),
+        text("(1234567890123450+5)&\"\"", "1234567890123450"),
+        logical("0.30000000000000004=0.3", true),
+        number("VALUE(\"1,234\")", 1_234.0, 0.0),
+        number("VALUE(\"(5%)\")", -0.05, 0.0),
+        number("\"50%\"*2", 1.0, 0.0),
+        number("DATEVALUE(\"2024-01-15 12:30\")", 45_306.0, 0.0),
+        error("VALUE(\"1/2\")", ExcelError::Value),
+        logical("AND(\"x\",1)", true),
+        error("(-8)^(2/3)", ExcelError::Number),
+        error("0^-1", ExcelError::DivisionByZero),
+        text("TEXT(\"abc\",\"0\")", "abc"),
+        text("TEXT(TRUE,\"0\")", "TRUE"),
+        text("TEXT(0,\"#\")", ""),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 
@@ -988,12 +1040,48 @@ fn text_fixed_and_dollar_round_and_format_as_mac_excel_16_114() {
         error("DOLLAR(1E+190,0)", ExcelError::Value),
         number("LEN(DOLLAR(-1E+188,0))", 254.0, 0.0),
         text("TEXT(1234567890123450+5,\"0\")", "1234567890123450"),
+        // Text Excel keeps as text, and the value's error before the format's.
+        text(
+            "TEXT(\"2024년 1월 15일\",\"yyyy-mm-dd\")",
+            "2024년 1월 15일",
+        ),
+        text("TEXT(\"Jan\",\"mm\")", "Jan"),
+        error("TEXT(1/0,NA())", ExcelError::DivisionByZero),
+        error("TEXT(NA(),1/0)", ExcelError::NotAvailable),
+        error("TEXT(REPT(\"a\",256),\"0\")", ExcelError::Value),
+        number("LEN(TEXT(REPT(\"a\",255),\"0\"))", 255.0, 0.0),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 
     let calculation = calculate_workbook(&workbook, CalculationOptions::default());
     for (offset, case) in cases.iter().enumerate() {
         assert_expected(&calculation, offset as u32 + 1, case);
+    }
+}
+
+#[test]
+fn text_excel_reads_as_a_number_in_unread_forms_is_unsupported_in_text() {
+    // Mac Excel 16.114 reads these as numbers (`TEXT("1/2","mm-dd")` is `01-02`), which the
+    // text reader leaves unread, so `TEXT` reports them instead of showing them as written.
+    for formula in [
+        "TEXT(\"1/2\",\"mm-dd\")",
+        "TEXT(\"Jan 2, 2024\",\"yyyy-mm-dd\")",
+        "TEXT(\"15-Jan-2024\",\"yyyy-mm-dd\")",
+        "TEXT(\"12:99\",\"h:mm\")",
+        "TEXT(\"1,0000\",\"0\")",
+    ] {
+        let calculation = calculate_workbook(
+            &workbook_with_formula_cases(&[text(formula, "")]),
+            CalculationOptions::default(),
+        );
+        assert!(
+            matches!(
+                calculation.cell(calculation_cell_id(1, 1)),
+                Some(CalculationCellResult::Unavailable(_))
+            ),
+            "{formula}: {:?}",
+            calculation.cell(calculation_cell_id(1, 1))
+        );
     }
 }
 

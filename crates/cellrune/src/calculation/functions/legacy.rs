@@ -288,14 +288,21 @@ fn kernel_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
         return Value::Error(ErrorKind::Value);
     }
     let value = engine.eval_scalar(context, &args[0]);
+    // The value's error comes before the format's: `TEXT(1/0,NA())` is `#DIV/0!` (Mac Excel 16.114).
+    if let Value::Error(kind) = value {
+        return Value::Error(kind);
+    }
     let format = match to_text(&engine.eval_scalar(context, &args[1])) {
         Ok(format) => format,
         Err(kind) => return Value::Error(kind),
     };
     let format_context = engine.format_context();
+    let numeric_text = engine.numeric_text();
     let formatted = match &value {
-        Value::Text(text) => match engine.numeric_text().number(text) {
+        Value::Text(text) => match numeric_text.number(text) {
             Some(number) => format_number(number, &format, format_context),
+            // Showing text Excel reads as a number unchanged would be a wrong answer.
+            None if numeric_text.may_read_otherwise(text) => Err(ErrorKind::Unsupported),
             None => format_text(text, &format, format_context),
         },
         Value::Logical(logical) => format_text(

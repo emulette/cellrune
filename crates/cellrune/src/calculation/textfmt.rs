@@ -103,7 +103,7 @@ pub(crate) fn format_text(
             return Err(ErrorKind::Value);
         }
     } else if !holds_text(section) {
-        return Ok(text.to_owned());
+        return limited_text(text.to_owned(), context);
     } else if section.condition.is_some() || shows_digits(&section.tokens) {
         // A conditional text section and digits beside `@` have not been measured.
         return Err(ErrorKind::Unsupported);
@@ -116,7 +116,18 @@ pub(crate) fn format_text(
             _ => output.push_str(&literal_text(token)?),
         }
     }
-    within_limit(output)
+    limited_text(output, context)
+}
+
+/// Applies the result limit to formatted text in `TEXT`, which rejects 256 units whether or not
+/// the code has a text section (`TEXT(REPT("a",256),"0")` is `#VALUE!`, Mac Excel 16.114); a cell
+/// shows long text.
+fn limited_text(text: String, context: FormatContext) -> Result<String, ErrorKind> {
+    if context.formula {
+        within_limit(text)
+    } else {
+        Ok(text)
+    }
 }
 
 /// Rejects a code Mac Excel 16.114 answers with `#VALUE!` whichever section formats the value:

@@ -1204,10 +1204,9 @@ impl<'workbook> Engine<'workbook> {
     /// Resolves which of a cell's competing sources actually supplies its value.
     ///
     /// A cell can hold a literal and still read as something else — an array formula or a dynamic
-    /// spill materializes over it, a cycle or a blocked upstream replaces it with an error. Both
-    /// the value and its decimal trace are derived from this one answer, because a trace taken
-    /// from a literal that something else overrode would let a sum snap to zero on terms that
-    /// never cancelled.
+    /// spill materializes over it, a cycle or a blocked upstream replaces it with an error. Every
+    /// read of the cell's value derives from this one answer, so a literal that something else
+    /// overrode never takes part in a calculation.
     fn value_source(&self, cell: CellId) -> ValueSource<'_> {
         self.stored_value_source(cell, self.stored_cell(cell))
     }

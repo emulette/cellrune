@@ -835,15 +835,13 @@ fn whole_column_arrays_agree_between_incremental_and_full_recalculation() {
     );
 }
 
-/// A spill member is not a formula cell, so its exact decimal has to be carried in the snapshot
-/// under its own address or an incremental pass cannot restore it.
+/// A spill member is not a formula cell, so its value has to be reseeded from the snapshot when an
+/// incremental pass leaves the spill clean.
 ///
-/// `B1:B3` spills `0.1`, `0.2`, `-0.3`, and `D1` sums them to exactly zero before scaling by `E1`.
-/// Editing only `E1` leaves the spill clean, so its values are reseeded from the snapshot — and if
-/// their decimals are not reseeded with them the sum keeps its `5.55e-17` residue, which the scale
-/// then magnifies into a plainly nonzero answer that the full calculation never produced.
+/// `B1:B3` spills `0.1`, `0.2`, `-0.3`, and `D1` sums them, which `SUM` corrects to exactly zero,
+/// before scaling by `E1`. Editing only `E1` must reproduce the full calculation's zero.
 #[test]
-fn spilled_decimal_traces_survive_an_incremental_recalculation() {
+fn spilled_values_reseed_the_corrected_total_in_an_incremental_recalculation() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
     let excel =

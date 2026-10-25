@@ -1429,7 +1429,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   (`TEXT(-0.25,"# ?/?")` is `- 1/4`). Decimal and scientific layouts round
   half away from zero the number's fifteen-significant-digit decimal, itself
   rounded with a tie toward zero, with digits past the fifteenth shown as
-  zeros (`TEXT(1.005,"0.00")` is `1.01`, `TEXT(1234567890123455,"0")` is
+  zeros (`TEXT(1.005,"0.00")` is `1.01`, `TEXT(1234567890123450+5,"0")` is
   `1234567890123450`,
   `TEXT(0.285,"0%")` is `29%`, `TEXT(2^60,"0")` is `1152921504606850000`);
   under `ArithmeticSemantics::Ieee754` they round the exact decimal of the double
@@ -1470,7 +1470,10 @@ than guessing a name from a different XLSX crate (`calamine`,
   one shows the text unchanged, whatever conditions its number sections hold.
   `@` in an earlier section, `General` anywhere, and a fourth section with
   digits or a condition are `#VALUE!` for text (`TEXT("abc","@;0")`,
-  `TEXT(TRUE,"General")`).
+  `TEXT(TRUE,"General")`). Text Excel reads as a number in a form the reader
+  leaves unread (`"1/2"`, `"Jan 2, 2024"`, `"12:99"`) is
+  `calculation.unsupported_expression` rather than shown as written, and an
+  error in the value comes before one in the format.
 - `FIXED(number, [decimals], [no_commas])`, added in 0.1.27, and `DOLLAR(number,
   [decimals])` read numeric text as `VALUE` does, truncate `decimals` (default
   2; outside -308 through 127 is `#VALUE!`), and round as `ROUND` does, to
@@ -1794,9 +1797,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   Microsoft's per-function budget — 20 iterations/`1e-7` for `IRR` and `RATE`,
   100/`1e-8` for `XIRR` — so inputs Excel abandons yield `#NUM!` here too;
   `ExtendedSearch` searches longer, as 0.1.2 did. `ArithmeticSemantics::Ieee754`
-  and `FinancialSolverSemantics::ExtendedSearch` select what 0.1.2 did in
-  those two places only; number reading and writing and the other function
-  semantics follow Excel in every mode. Both axes are also carried
+  keeps binary values for correction, comparison, and rounding only; number
+  reading and writing, the removal of rounding overflow, and the other
+  function semantics follow Excel in every mode. Both axes are also carried
   by the interop DTO and the Python, Node.js, and MCP boundaries.
   The random seed is carried the same way: `CalculationOptionsDto.random_seed`
   and the transaction report's `calculation_options.random_seed`, Python
@@ -2002,6 +2005,7 @@ crate package use `cargo run --example <name> -- [arguments]`.
 - `write_phonetic_workbook.rs` — authors annotated text and a frozen pane
   (output path argument).
 - `select_calculation_modes.rs` — calculates the same formulas under the
-  default Excel-compatible policies and under the 0.1.2 opt-ins, so the numbers
+  default Excel-compatible policies and under the `Ieee754` and
+  `ExtendedSearch` opt-ins, so the numbers
   `ArithmeticSemantics` and `FinancialSolverSemantics` change are visible side
   by side (no arguments).
