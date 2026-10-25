@@ -223,7 +223,9 @@ pub(in crate::calculation) fn call_function_evaluation(
     let prepared = CallArguments::for_call(context, descriptor, args);
     let args = prepared.as_slice();
     let context = context.with_arguments(args);
-    if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args) {
+    if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args)
+        .or_else(|| elementwise::range_argument_error(engine, context, descriptor, args))
+    {
         return super::scope::ScalarEvaluation::new(Value::Error(kind));
     }
     evaluate_prepared(descriptor, engine, context, args, written)
@@ -474,7 +476,8 @@ pub(super) fn call_function_array(
     let Some(evaluator) = descriptor.array_evaluator() else {
         return elementwise::call(engine, context, descriptor, args, written);
     };
-    if !evaluator.reads_value_arrays() && elementwise::value_argument_holds_array(descriptor, args)
+    if !evaluator.reads_value_arrays()
+        && elementwise::value_argument_holds_array(context, descriptor, args)
     {
         return Some(Err(ErrorKind::Unsupported));
     }
@@ -501,6 +504,19 @@ pub(super) fn call_function_array(
         }
         ArrayEvaluator::Grouped(function) => {
             Some(grouped::call_array(engine, context, function, args))
+        }
+        ArrayEvaluator::Selection(kernel::SelectionFunction::Choose) => {
+            Some(lookup::choose_array(engine, context, args).map(ArrayEvaluation::new))
+        }
+        ArrayEvaluator::Selection(kernel::SelectionFunction::Ifs) => {
+            Some(logical::ifs_array(engine, context, args).map(ArrayEvaluation::new))
+        }
+        ArrayEvaluator::Selection(kernel::SelectionFunction::Switch) => {
+            Some(logical::switch_array(engine, context, args).map(ArrayEvaluation::new))
+        }
+        ArrayEvaluator::OrderStatistic(function) => {
+            statistical::order_statistic_array(engine, context, function, args)
+                .map(|result| result.map(ArrayEvaluation::new))
         }
         ArrayEvaluator::XLookup => {
             Some(lookup::call_xlookup_array(engine, context, args).map(ArrayEvaluation::new))
@@ -833,6 +849,7 @@ pub(in crate::calculation) fn prepare_evaluator_arguments<'formula>(
 /// Whether a value argument of the function `evaluator` calls certainly holds an array value; see
 /// [`elementwise::value_argument_holds_array`].
 pub(in crate::calculation) fn evaluator_value_argument_holds_array(
+    context: EvalContext<'_>,
     evaluator: Evaluator,
     args: &[Expr],
 ) -> bool {
@@ -840,7 +857,18 @@ pub(in crate::calculation) fn evaluator_value_argument_holds_array(
         .iter()
         .copied()
         .find(|descriptor| descriptor.evaluator() == evaluator)
-        .is_some_and(|descriptor| elementwise::value_argument_holds_array(descriptor, args))
+        .is_some_and(|descriptor| {
+            elementwise::value_argument_holds_array(context, descriptor, args)
+        })
+}
+
+/// Whether `expr` may evaluate to more than one value; see [`elementwise::may_hold_array`].
+pub(in crate::calculation) fn may_hold_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    expr: &Expr,
+) -> bool {
+    elementwise::may_hold_array(engine, context, expr)
 }
 
 pub(super) fn is_supported_function(name: &str) -> bool {
@@ -855,8 +883,24 @@ pub(in crate::calculation) fn function_result_kind(name: &str) -> Option<Functio
     descriptor::resolve(name).map(FunctionDescriptor::result_kind)
 }
 
-pub(super) fn is_reference_returning_function(name: &str) -> bool {
-    descriptor::resolve(name).is_some_and(|descriptor| descriptor.result_kind().returns_reference())
+/// Whether a call to `name` with `args` returns a reference. `INDEX` whose indexes hold arrays
+/// selects a reference per element, which is read as the values they hold instead.
+pub(super) fn call_returns_reference(context: EvalContext<'_>, name: &str, args: &[Expr]) -> bool {
+    descriptor::resolve(name).is_some_and(|descriptor| {
+        descriptor.result_kind().returns_reference()
+            && !(descriptor.evaluator() == Evaluator::Legacy(kernel::LegacyFunction::Index)
+                && index_arguments_hold_arrays(context, args))
+    })
+}
+
+/// Whether a row, column, or area index of an `INDEX` call certainly holds an array.
+pub(in crate::calculation) fn index_arguments_hold_arrays(
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> bool {
+    args.iter()
+        .skip(1)
+        .any(|arg| elementwise::holds_array_value(context, arg))
 }
 
 pub(super) fn descriptor_sheet_span_policy(name: &str) -> Option<SheetSpanPolicy> {

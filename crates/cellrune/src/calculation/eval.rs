@@ -1567,11 +1567,16 @@ impl<'workbook> Engine<'workbook> {
         context.charge_function_iterations(self.options.limits(), iterations)
     }
 
+    /// Charges `cells` reference reads to the formula, unless the context reads references it has
+    /// already charged, as each element after the first of an element-wise call does.
     pub(super) fn charge_reference_cells(
         &self,
         context: EvalContext<'_>,
         cells: u64,
     ) -> Result<(), ErrorKind> {
+        if !context.charges_reference_work() {
+            return Ok(());
+        }
         context.charge_reference_cells(self.options.limits(), cells)
     }
 

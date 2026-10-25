@@ -355,6 +355,11 @@ impl ReferenceValue {
         self.areas().iter().flat_map(ReferenceArea::rects)
     }
 
+    /// The number of cells the reference covers, counting a whole column's every row.
+    pub(super) fn cell_count(&self) -> u64 {
+        self.rects().map(|rect| rect.height() * rect.width()).sum()
+    }
+
     pub(super) fn single_rect(&self) -> Result<Rect, ErrorKind> {
         match self {
             Self::Empty => Err(ErrorKind::Ref),

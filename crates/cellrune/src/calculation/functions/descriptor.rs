@@ -11,9 +11,10 @@ use super::kernel::{
     DynamicFunction, EngineeringFunction, Evaluator, FinancialAdditionalFunction,
     FinancialFunction, FixedIncomeFunction, GroupedArrayFunction, GroupedFunction,
     InformationFunction, LegacyArrayFunction, LegacyFunction, LogicalFunction, LookupFunction,
-    MathFunction, ModernTextArrayFunction, ModernTextFunction, RegressionFunction, RomanFunction,
-    StatisticalAdditionalFunction, StatisticalFunction, SumOfSquaresFunction,
-    TextAdditionalFunction, TextFunction, TrigonometryFunction,
+    MathFunction, ModernTextArrayFunction, ModernTextFunction, OrderStatisticFunction,
+    RegressionFunction, RomanFunction, SelectionFunction, StatisticalAdditionalFunction,
+    StatisticalFunction, SumOfSquaresFunction, TextAdditionalFunction, TextFunction,
+    TrigonometryFunction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -173,6 +174,7 @@ pub(super) struct FunctionDescriptor {
     official: bool,
     builtin_callable: Option<BuiltinCallable>,
     aggregate_callable: Option<AggregateCallableCapability>,
+    rejects_ranges: bool,
 }
 
 impl FunctionDescriptor {
@@ -196,6 +198,7 @@ impl FunctionDescriptor {
             official: true,
             builtin_callable: None,
             aggregate_callable: None,
+            rejects_ranges: false,
         }
     }
 
@@ -257,6 +260,14 @@ impl FunctionDescriptor {
         self.array_evaluator = Some(evaluator);
         self.result_kind = FunctionResultKind::ReferenceOrArray;
         self.catalog_array_result = true;
+        self
+    }
+
+    /// Marks a function from Excel's Analysis ToolPak, which returns `#VALUE!` for a range of
+    /// several cells in a value argument rather than intersecting or lifting it (Mac Excel 16.114
+    /// `EOMONTH(A1:A3,0)` in any formula), while it lifts a computed array.
+    const fn rejecting_ranges(mut self) -> Self {
+        self.rejects_ranges = true;
         self
     }
 
@@ -341,6 +352,10 @@ impl FunctionDescriptor {
         } else {
             self.result_kind
         }
+    }
+
+    pub(super) const fn rejects_ranges(self) -> bool {
+        self.rejects_ranges
     }
 
     pub(super) const fn sheet_span_policy(self) -> SheetSpanPolicy {
@@ -530,8 +545,10 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Xor, "XOR", Logical),
     function!(IfNa, "IFNA", Logical)
         .with_array_evaluator(ArrayEvaluator::Legacy(LegacyArrayFunction::IfNa)),
-    function!(Ifs, "IFS", Logical),
-    function!(Switch, "SWITCH", Logical),
+    function!(Ifs, "IFS", Logical)
+        .with_array_evaluator(ArrayEvaluator::Selection(SelectionFunction::Ifs)),
+    function!(Switch, "SWITCH", Logical)
+        .with_array_evaluator(ArrayEvaluator::Selection(SelectionFunction::Switch)),
     function!(Sum, "SUM", Aggregate)
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS)
         .with_builtin_aggregate(AggregateCallableCapability::Unary),
@@ -592,15 +609,16 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Log, "LOG", Math),
     function!(Log10, "LOG10", Math),
     function!(Mod, "MOD", Math),
-    function!(MRound, "MROUND", Math),
+    function!(MRound, "MROUND", Math).rejecting_ranges(),
     function!(Odd, "ODD", Math),
     function!(Pi, "PI", Math),
     function!(Power, "POWER", Math),
-    function!(Quotient, "QUOTIENT", Math),
+    function!(Quotient, "QUOTIENT", Math).rejecting_ranges(),
     function!(Rand, "RAND", Math)
         .with_volatility(Volatility::Random)
         .with_minimum_version(CompatibilityVersion::V0_1_26),
     function!(RandBetween, "RANDBETWEEN", Math)
+        .rejecting_ranges()
         .with_volatility(Volatility::Random)
         .with_minimum_version(CompatibilityVersion::V0_1_26),
     function!(Round, "ROUND", Math),
@@ -609,7 +627,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(SeriesSum, "SERIESSUM", Math),
     function!(Sign, "SIGN", Math),
     function!(Sqrt, "SQRT", Math),
-    function!(SqrtPi, "SQRTPI", Math),
+    function!(SqrtPi, "SQRTPI", Math).rejecting_ranges(),
     function!(Trunc, "TRUNC", Math),
     function!(Arabic, "ARABIC", Roman).with_minimum_version(CompatibilityVersion::V0_1_11),
     function!(Roman, "ROMAN", Roman).with_minimum_version(CompatibilityVersion::V0_1_11),
@@ -639,7 +657,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Combin, "COMBIN", Combinatorics),
     function!(Combina, "COMBINA", Combinatorics),
     function!(Fact, "FACT", Combinatorics),
-    function!(FactDouble, "FACTDOUBLE", Combinatorics),
+    function!(FactDouble, "FACTDOUBLE", Combinatorics).rejecting_ranges(),
     function!(Gcd, "GCD", Combinatorics),
     function!(Lcm, "LCM", Combinatorics),
     function!(Multinomial, "MULTINOMIAL", Combinatorics),
@@ -649,43 +667,59 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(SumX2My2, "SUMX2MY2", SumOfSquares),
     function!(SumX2Py2, "SUMX2PY2", SumOfSquares),
     function!(SumXMy2, "SUMXMY2", SumOfSquares),
-    function!(BesselI, "BESSELI", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
-    function!(BesselJ, "BESSELJ", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
-    function!(BesselK, "BESSELK", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
-    function!(BesselY, "BESSELY", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
-    function!(Bin2Dec, "BIN2DEC", Engineering),
-    function!(Bin2Hex, "BIN2HEX", Engineering),
-    function!(Bin2Oct, "BIN2OCT", Engineering),
+    function!(BesselI, "BESSELI", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(BesselJ, "BESSELJ", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(BesselK, "BESSELK", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(BesselY, "BESSELY", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(Bin2Dec, "BIN2DEC", Engineering).rejecting_ranges(),
+    function!(Bin2Hex, "BIN2HEX", Engineering).rejecting_ranges(),
+    function!(Bin2Oct, "BIN2OCT", Engineering).rejecting_ranges(),
     function!(BitAnd, "BITAND", Engineering),
     function!(BitLShift, "BITLSHIFT", Engineering),
     function!(BitOr, "BITOR", Engineering),
     function!(BitRShift, "BITRSHIFT", Engineering),
     function!(BitXor, "BITXOR", Engineering),
-    function!(Dec2Bin, "DEC2BIN", Engineering),
-    function!(Dec2Hex, "DEC2HEX", Engineering),
-    function!(Dec2Oct, "DEC2OCT", Engineering),
-    function!(Delta, "DELTA", Engineering),
-    function!(Erf, "ERF", Engineering),
-    function!(ErfPrecise, "ERF.PRECISE", Engineering),
-    function!(Erfc, "ERFC", Engineering),
-    function!(ErfcPrecise, "ERFC.PRECISE", Engineering),
-    function!(GeStep, "GESTEP", Engineering),
-    function!(Hex2Bin, "HEX2BIN", Engineering),
-    function!(Hex2Dec, "HEX2DEC", Engineering),
-    function!(Hex2Oct, "HEX2OCT", Engineering),
-    function!(Oct2Bin, "OCT2BIN", Engineering),
-    function!(Oct2Dec, "OCT2DEC", Engineering),
-    function!(Oct2Hex, "OCT2HEX", Engineering),
-    function!(Convert, "CONVERT", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
-    function!(Complex, "COMPLEX", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
-    function!(ImAbs, "IMABS", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(Dec2Bin, "DEC2BIN", Engineering).rejecting_ranges(),
+    function!(Dec2Hex, "DEC2HEX", Engineering).rejecting_ranges(),
+    function!(Dec2Oct, "DEC2OCT", Engineering).rejecting_ranges(),
+    function!(Delta, "DELTA", Engineering).rejecting_ranges(),
+    function!(Erf, "ERF", Engineering).rejecting_ranges(),
+    function!(ErfPrecise, "ERF.PRECISE", Engineering).rejecting_ranges(),
+    function!(Erfc, "ERFC", Engineering).rejecting_ranges(),
+    function!(ErfcPrecise, "ERFC.PRECISE", Engineering).rejecting_ranges(),
+    function!(GeStep, "GESTEP", Engineering).rejecting_ranges(),
+    function!(Hex2Bin, "HEX2BIN", Engineering).rejecting_ranges(),
+    function!(Hex2Dec, "HEX2DEC", Engineering).rejecting_ranges(),
+    function!(Hex2Oct, "HEX2OCT", Engineering).rejecting_ranges(),
+    function!(Oct2Bin, "OCT2BIN", Engineering).rejecting_ranges(),
+    function!(Oct2Dec, "OCT2DEC", Engineering).rejecting_ranges(),
+    function!(Oct2Hex, "OCT2HEX", Engineering).rejecting_ranges(),
+    function!(Convert, "CONVERT", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(Complex, "COMPLEX", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImAbs, "IMABS", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImArgument, "IMARGUMENT", Engineering)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImConjugate, "IMCONJUGATE", Engineering)
         .with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImDiv, "IMDIV", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImExp, "IMEXP", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImImaginary, "IMAGINARY", Engineering)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImLn, "IMLN", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImLog10, "IMLOG10", Engineering).with_minimum_version(CompatibilityVersion::V0_1_22),
@@ -693,7 +727,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(ImPower, "IMPOWER", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImProduct, "IMPRODUCT", Engineering)
         .with_minimum_version(CompatibilityVersion::V0_1_14),
-    function!(ImReal, "IMREAL", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
+    function!(ImReal, "IMREAL", Engineering)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImSqrt, "IMSQRT", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImSub, "IMSUB", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
     function!(ImSum, "IMSUM", Engineering).with_minimum_version(CompatibilityVersion::V0_1_14),
@@ -708,7 +744,8 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(ImSinh, "IMSINH", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(ImTan, "IMTAN", Engineering).with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Address, "ADDRESS", Lookup),
-    function!(Choose, "CHOOSE", Lookup),
+    function!(Choose, "CHOOSE", Lookup)
+        .with_array_evaluator(ArrayEvaluator::Selection(SelectionFunction::Choose)),
     function!(Column, "COLUMN", Lookup),
     function!(Columns, "COLUMNS", Lookup),
     function!(HLookup, "HLOOKUP", Lookup),
@@ -763,7 +800,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(IsBlank, "ISBLANK", Information),
     function!(IsErr, "ISERR", Information),
     function!(IsError, "ISERROR", Information),
-    function!(IsEven, "ISEVEN", Information),
+    function!(IsEven, "ISEVEN", Information).rejecting_ranges(),
     function!(IsFormula, "ISFORMULA", Information)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::FormulaPredicate,
@@ -774,7 +811,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(IsNa, "ISNA", Information),
     function!(IsNonText, "ISNONTEXT", Information),
     function!(IsNumber, "ISNUMBER", Information),
-    function!(IsOdd, "ISODD", Information),
+    function!(IsOdd, "ISODD", Information).rejecting_ranges(),
     function!(IsRef, "ISREF", Information)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
             ReferenceMetadataKind::Predicate,
@@ -852,21 +889,23 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(DateValue, "DATEVALUE", Date).with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(DateDif, "DATEDIF", Date),
     function!(Day, "DAY", Date),
-    function!(EDate, "EDATE", Date),
-    function!(Eomonth, "EOMONTH", Date),
+    function!(EDate, "EDATE", Date).rejecting_ranges(),
+    function!(Eomonth, "EOMONTH", Date).rejecting_ranges(),
     function!(Month, "MONTH", Date),
-    function!(NetworkDays, "NETWORKDAYS", Date),
+    function!(NetworkDays, "NETWORKDAYS", Date).rejecting_ranges(),
     function!(NetworkDaysIntl, "NETWORKDAYS.INTL", Date)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(Now, "NOW", Date).with_volatility(Volatility::Now),
     function!(Today, "TODAY", Date).with_volatility(Volatility::Today),
     function!(TimeValue, "TIMEVALUE", Date).with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(Weekday, "WEEKDAY", Date),
-    function!(Workday, "WORKDAY", Date),
+    function!(Workday, "WORKDAY", Date).rejecting_ranges(),
     function!(WorkdayIntl, "WORKDAY.INTL", Date)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_16),
     function!(Year, "YEAR", Date),
-    function!(YearFrac, "YEARFRAC", Date),
+    function!(YearFrac, "YEARFRAC", Date).rejecting_ranges(),
     function!(Days, "DAYS", DateAdditional),
     function!(Days360, "DAYS360", DateAdditional),
     function!(Hour, "HOUR", DateAdditional),
@@ -874,7 +913,7 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Minute, "MINUTE", DateAdditional),
     function!(Second, "SECOND", DateAdditional),
     function!(Time, "TIME", DateAdditional),
-    function!(WeekNum, "WEEKNUM", DateAdditional),
+    function!(WeekNum, "WEEKNUM", DateAdditional).rejecting_ranges(),
     function!(ByCol, "BYCOL", Dynamic)
         .with_array_evaluator(ArrayEvaluator::Dynamic(DynamicArrayFunction::ByCol)),
     function!(ByRow, "BYROW", Dynamic)
@@ -978,7 +1017,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_aliases(&[FunctionAlias::official("ZTEST")])
         .with_minimum_version(CompatibilityVersion::V0_1_13),
     function!(Intercept, "INTERCEPT", Statistical),
-    function!(Large, "LARGE", Statistical),
+    function!(Large, "LARGE", Statistical).with_scalar_array_evaluator(
+        ArrayEvaluator::OrderStatistic(OrderStatisticFunction::Large),
+    ),
     function!(MaxIfs, "MAXIFS", Statistical),
     function!(Median, "MEDIAN", Statistical),
     function!(MinIfs, "MINIFS", Statistical),
@@ -988,8 +1029,14 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(NormSDist, "NORM.S.DIST", Statistical),
     function!(Pearson, "PEARSON", Statistical),
     function!(PercentileInc, "PERCENTILE.INC", Statistical)
+        .with_scalar_array_evaluator(ArrayEvaluator::OrderStatistic(
+            OrderStatisticFunction::PercentileInc,
+        ))
         .with_aliases(&[FunctionAlias::official("PERCENTILE")]),
     function!(PercentileExc, "PERCENTILE.EXC", Statistical)
+        .with_scalar_array_evaluator(ArrayEvaluator::OrderStatistic(
+            OrderStatisticFunction::PercentileExc,
+        ))
         .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(PercentRankInc, "PERCENTRANK.INC", Statistical)
         .with_aliases(&[FunctionAlias::official("PERCENTRANK")]),
@@ -997,8 +1044,14 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(Prob, "PROB", Statistical).with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(QuartileInc, "QUARTILE.INC", Statistical)
+        .with_scalar_array_evaluator(ArrayEvaluator::OrderStatistic(
+            OrderStatisticFunction::QuartileInc,
+        ))
         .with_aliases(&[FunctionAlias::official("QUARTILE")]),
     function!(QuartileExc, "QUARTILE.EXC", Statistical)
+        .with_scalar_array_evaluator(ArrayEvaluator::OrderStatistic(
+            OrderStatisticFunction::QuartileExc,
+        ))
         .with_minimum_version(CompatibilityVersion::V0_1_22),
     function!(RankEq, "RANK.EQ", Statistical).with_aliases(&[FunctionAlias::official("RANK")]),
     function!(RankAvg, "RANK.AVG", Statistical).with_minimum_version(CompatibilityVersion::V0_1_20),
@@ -1007,7 +1060,9 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
         .with_minimum_version(CompatibilityVersion::V0_1_20),
     function!(Rsq, "RSQ", Statistical),
     function!(Slope, "SLOPE", Statistical),
-    function!(Small, "SMALL", Statistical),
+    function!(Small, "SMALL", Statistical).with_scalar_array_evaluator(
+        ArrayEvaluator::OrderStatistic(OrderStatisticFunction::Small),
+    ),
     function!(StDevS, "STDEV.S", Statistical)
         .with_aliases(&[FunctionAlias::official("STDEV")])
         .with_sheet_span_policy(COLLECT_ACROSS_SHEETS),
@@ -1169,66 +1224,103 @@ const DESCRIPTORS: &[FunctionDescriptor] = &[
     function!(Sln, "SLN", Financial),
     function!(Syd, "SYD", Financial),
     function!(Xirr, "XIRR", Financial),
-    function!(DollarDe, "DOLLARDE", FinancialAdditional),
-    function!(DollarFr, "DOLLARFR", FinancialAdditional),
-    function!(Effect, "EFFECT", FinancialAdditional),
-    function!(FvSchedule, "FVSCHEDULE", FinancialAdditional),
+    function!(DollarDe, "DOLLARDE", FinancialAdditional).rejecting_ranges(),
+    function!(DollarFr, "DOLLARFR", FinancialAdditional).rejecting_ranges(),
+    function!(Effect, "EFFECT", FinancialAdditional).rejecting_ranges(),
+    function!(FvSchedule, "FVSCHEDULE", FinancialAdditional).rejecting_ranges(),
     function!(IsPmt, "ISPMT", FinancialAdditional),
     function!(Mirr, "MIRR", FinancialAdditional),
     function!(Nominal, "NOMINAL", FinancialAdditional),
     function!(PDuration, "PDURATION", FinancialAdditional),
     function!(Rri, "RRI", FinancialAdditional),
     function!(AmorDegrc, "AMORDEGRC", FinancialAdditional)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(AmorLinc, "AMORLINC", FinancialAdditional)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(CumIpmt, "CUMIPMT", FinancialAdditional)
         .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(CumPrinc, "CUMPRINC", FinancialAdditional)
         .with_minimum_version(CompatibilityVersion::V0_1_27),
     function!(Vdb, "VDB", FinancialAdditional).with_minimum_version(CompatibilityVersion::V0_1_27),
-    function!(Accrint, "ACCRINT", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Accrint, "ACCRINT", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(Accrintm, "ACCRINTM", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(CoupDayBs, "COUPDAYBS", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(CoupDays, "COUPDAYS", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(CoupDaysNc, "COUPDAYSNC", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(CoupNcd, "COUPNCD", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(CoupNum, "COUPNUM", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(CoupPcd, "COUPPCD", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(Disc, "DISC", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupNcd, "COUPNCD", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupNum, "COUPNUM", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(CoupPcd, "COUPPCD", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Disc, "DISC", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(Duration, "DURATION", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(IntRate, "INTRATE", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(IntRate, "INTRATE", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(MDuration, "MDURATION", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(OddFPrice, "ODDFPRICE", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(OddFYield, "ODDFYIELD", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(OddLPrice, "ODDLPRICE", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(OddLYield, "ODDLYIELD", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(Price, "PRICE", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Price, "PRICE", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(PriceDisc, "PRICEDISC", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(PriceMat, "PRICEMAT", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(Received, "RECEIVED", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(TbillEq, "TBILLEQ", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(TbillEq, "TBILLEQ", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(TbillPrice, "TBILLPRICE", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(TbillYield, "TBILLYIELD", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
-    function!(Yield, "YIELD", FixedIncome).with_minimum_version(CompatibilityVersion::V0_1_15),
+    function!(Yield, "YIELD", FixedIncome)
+        .rejecting_ranges()
+        .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(YieldDisc, "YIELDDISC", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(YieldMat, "YIELDMAT", FixedIncome)
+        .rejecting_ranges()
         .with_minimum_version(CompatibilityVersion::V0_1_15),
     function!(Areas, "AREAS", Areas)
         .with_dependency_kind(DependencyKind::ReferenceMetadataOnly(
@@ -1465,7 +1557,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "241b67b64f2df27bb21b13f1406624d9a4035d50416af97adfc48ed14eaa7cad",
+            actual, "9d8bcd2c56cc356fb64d8eb99fc61fee99c537ee3d6f4c0cdcdc959b61709203",
             "stable v0.1.10 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1481,7 +1573,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "7fcd905a8ebe2c47ef82c1710470099714671de13f7075758d949570a6b51c45",
+            actual, "6d4916cbc4cf83c01694829889f55e9324632477a18fb8cab21e76a950519821",
             "stable v0.1.11 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1561,7 +1653,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "d638af7925693848a2cfc4edc3ee0e3f92eed1b58f2f9a000c217914712b3d4b",
+            actual, "67bc9badcd9f406f1b1690d411b96ae3f2759c8faab35dde56a4a58ee32643b2",
             "stable v0.1.12 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1676,7 +1768,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "5d9136f9a8c12d6bc0e39b8fc48b7942158adbb104b89bef1447ea707efe8be4",
+            actual, "b6aac8bff1a8feefac8980347909e088aa6109c8fc8fc4130d170c360843ea62",
             "stable v0.1.13 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1692,7 +1784,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "c4b1c62cc55c5de65fd78335b2bfee483174d22f2ee63971d9f52701fe707adc",
+            actual, "91277d2e733fa4b6f986486184defc549349f978710ba70a09813b1d26eb5fe6",
             "stable v0.1.14 semantic snapshot changed:\n{snapshot}",
         );
     }
@@ -1708,7 +1800,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         assert_eq!(
-            actual, "7e31651d8aa1ca9cdc723e574ac9ac457699973a44e8188afccc2bd7cb485259",
+            actual, "5a92fe558e12b72d41383946f2e26b2941014c5342919e2195ac6cdd4342d632",
             "stable v0.1.16 semantic snapshot changed:\n{snapshot}",
         );
     }

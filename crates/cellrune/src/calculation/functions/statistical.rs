@@ -1,12 +1,13 @@
-use super::kernel::StatisticalFunction;
+use super::kernel::{OrderStatisticFunction, StatisticalFunction};
 use std::collections::BTreeMap;
 
 use super::super::ast::Expr;
 use super::super::coerce::to_logical;
+use super::super::coerce::to_number;
 use super::super::criteria::CompiledCriteria;
 use super::super::eval::{Engine, EvalContext};
 use super::super::excel_digits::{Rounding, round_quotient};
-use super::super::runtime::Rect;
+use super::super::runtime::{Array, Rect};
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
 use super::array_common::poll_cancellation;
@@ -521,19 +522,104 @@ fn order_statistic(
 
 /// `LARGE` (descending) or `SMALL` (`ascending`): the `rank`-th value of `numbers`.
 pub(super) fn order_statistic_of(mut numbers: Vec<f64>, rank: f64, ascending: bool) -> Value {
+    match order_statistic_index(numbers.len(), rank, ascending) {
+        Ok(index) => Value::Number(select_ascending(&mut numbers, index)),
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// The ascending position of the `rank`-th value among `count` values.
+fn order_statistic_index(count: usize, rank: f64, ascending: bool) -> Result<usize, ErrorKind> {
     if rank < 1.0 {
-        return Value::Error(ErrorKind::Num);
+        return Err(ErrorKind::Num);
     }
     let rank = rank.trunc() as usize;
-    if rank > numbers.len() {
-        return Value::Error(ErrorKind::Num);
+    if rank > count {
+        return Err(ErrorKind::Num);
     }
-    let index = if ascending {
-        rank - 1
-    } else {
-        numbers.len() - rank
+    Ok(if ascending { rank - 1 } else { count - rank })
+}
+
+/// `LARGE`, `SMALL`, `PERCENTILE`, and `QUARTILE` for a `k` that holds an array: the numbers are
+/// collected and sorted once and every element of `k` reads its value from them. `None` when `k`
+/// holds one value, which the scalar call answers.
+pub(super) fn order_statistic_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    function: OrderStatisticFunction,
+    args: &[Expr],
+) -> Option<Result<Array, ErrorKind>> {
+    let [data, k] = args else {
+        return None;
     };
-    Value::Number(select_ascending(&mut numbers, index))
+    if !super::elementwise::may_hold_array(engine, context, k) {
+        return None;
+    }
+    Some(sorted_order_statistics(engine, context, function, data, k))
+}
+
+fn sorted_order_statistics(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    function: OrderStatisticFunction,
+    data: &Expr,
+    k: &Expr,
+) -> Result<Array, ErrorKind> {
+    let ks = match engine.eval_array(context, k) {
+        Ok(ks) => ks,
+        Err(kind) if kind.is_engine_issue() => return Err(kind),
+        Err(kind) => Array::scalar(Value::Error(kind)),
+    };
+    let cells = ks.data.len() as u64;
+    engine.ensure_array_cells(cells)?;
+    engine.charge_function_iterations(context, cells)?;
+    let sorted = match numeric_arguments(engine, context, std::slice::from_ref(data)) {
+        Ok(mut numbers) => {
+            numbers.sort_unstable_by(f64::total_cmp);
+            Ok(numbers)
+        }
+        Err(kind) if kind.is_engine_issue() => return Err(kind),
+        Err(kind) => Err(kind),
+    };
+    let numeric_text = engine.numeric_text();
+    let data = ks
+        .data
+        .iter()
+        .map(|element| {
+            let sorted = match &sorted {
+                Ok(sorted) => sorted,
+                Err(kind) => return Value::Error(*kind),
+            };
+            let percentile = |quartile, interval| {
+                // An empty set fails before the probability is read.
+                if sorted.is_empty() {
+                    return Value::Error(ErrorKind::Num);
+                }
+                to_number(element, numeric_text).map_or_else(Value::Error, |probability| {
+                    percentile_in_sorted(sorted, probability, quartile, interval)
+                })
+            };
+            let order = |ascending| {
+                to_number(element, numeric_text).map_or_else(Value::Error, |rank| {
+                    order_statistic_index(sorted.len(), rank, ascending)
+                        .map_or_else(Value::Error, |index| Value::Number(sorted[index]))
+                })
+            };
+            match function {
+                OrderStatisticFunction::Large => order(false),
+                OrderStatisticFunction::Small => order(true),
+                OrderStatisticFunction::PercentileInc => percentile(false, RankInterval::Inclusive),
+                OrderStatisticFunction::PercentileExc => percentile(false, RankInterval::Exclusive),
+                OrderStatisticFunction::QuartileInc => percentile(true, RankInterval::Inclusive),
+                OrderStatisticFunction::QuartileExc => percentile(true, RankInterval::Exclusive),
+            }
+        })
+        .collect();
+    Ok(Array {
+        rows: ks.rows,
+        cols: ks.cols,
+        data,
+    })
 }
 
 /// Returns the value at `index` of the ascending order and leaves smaller values before it and
@@ -696,26 +782,16 @@ fn percentile(
 /// `PERCENTILE` or, with `quartile`, `QUARTILE` of `numbers` over the `interval` convention.
 pub(super) fn percentile_of(
     mut numbers: Vec<f64>,
-    mut probability: f64,
+    probability: f64,
     quartile: bool,
     interval: RankInterval,
 ) -> Value {
     if numbers.is_empty() {
         return Value::Error(ErrorKind::Num);
     }
-    if quartile {
-        probability = probability.trunc() / 4.0;
-    }
-    let count = numbers.len() as f64;
-    // Zero-based position of the percentile among the sorted values.
-    let position = match interval {
-        RankInterval::Inclusive if (0.0..=1.0).contains(&probability) => {
-            (count - 1.0) * probability
-        }
-        RankInterval::Exclusive if (1.0..=count).contains(&(probability * (count + 1.0))) => {
-            probability * (count + 1.0) - 1.0
-        }
-        _ => return Value::Error(ErrorKind::Num),
+    let position = match percentile_position(numbers.len(), probability, quartile, interval) {
+        Ok(position) => position,
+        Err(kind) => return Value::Error(kind),
     };
     let lower = position.floor() as usize;
     let fraction = position - lower as f64;
@@ -726,6 +802,46 @@ pub(super) fn percentile_of(
         lower_value
     };
     Value::Number(interpolate(lower_value, upper_value, fraction))
+}
+
+/// `PERCENTILE` or `QUARTILE` of ascending `sorted` numbers.
+fn percentile_in_sorted(
+    sorted: &[f64],
+    probability: f64,
+    quartile: bool,
+    interval: RankInterval,
+) -> Value {
+    match percentile_position(sorted.len(), probability, quartile, interval) {
+        Ok(position) => {
+            let lower = position.floor() as usize;
+            let upper = sorted.get(lower + 1).copied().unwrap_or(sorted[lower]);
+            Value::Number(interpolate(sorted[lower], upper, position - lower as f64))
+        }
+        Err(kind) => Value::Error(kind),
+    }
+}
+
+/// The zero-based position of a percentile among `count` sorted values; a quartile's
+/// `probability` is its whole quarter.
+fn percentile_position(
+    count: usize,
+    mut probability: f64,
+    quartile: bool,
+    interval: RankInterval,
+) -> Result<f64, ErrorKind> {
+    if quartile {
+        probability = probability.trunc() / 4.0;
+    }
+    let count = count as f64;
+    match interval {
+        RankInterval::Inclusive if (0.0..=1.0).contains(&probability) => {
+            Ok((count - 1.0) * probability)
+        }
+        RankInterval::Exclusive if (1.0..=count).contains(&(probability * (count + 1.0))) => {
+            Ok(probability * (count + 1.0) - 1.0)
+        }
+        _ => Err(ErrorKind::Num),
+    }
 }
 
 /// The mean of two finite numbers, halving first only when their sum overflows.

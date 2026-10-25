@@ -759,6 +759,21 @@ function_enum!(ModernTextArrayFunction {
 
 function_enum!(GroupedArrayFunction { GroupBy, PivotBy });
 
+function_enum!(SelectionFunction {
+    Choose,
+    Ifs,
+    Switch
+});
+
+function_enum!(OrderStatisticFunction {
+    Large,
+    Small,
+    PercentileInc,
+    PercentileExc,
+    QuartileInc,
+    QuartileExc,
+});
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(in crate::calculation) enum ArrayEvaluator {
     Legacy(LegacyArrayFunction),
@@ -771,12 +786,16 @@ pub(in crate::calculation) enum ArrayEvaluator {
     ModernText(ModernTextArrayFunction),
     Grouped(GroupedArrayFunction),
     XLookup,
+    /// `LARGE`, `SMALL`, `PERCENTILE`, and `QUARTILE` over an array of `k`.
+    OrderStatistic(OrderStatisticFunction),
+    /// `CHOOSE`, `IFS`, and `SWITCH`, which take the arguments their selectors pick as arrays.
+    Selection(SelectionFunction),
 }
 
 impl ArrayEvaluator {
     /// Whether the evaluator takes arrays where the call contract takes values and answers element
-    /// by element, as `IF`, `IFERROR`, `IFNA`, and `INDEX` do, or reads them whole, as `TYPE` does,
-    /// rather than returning an array of its own.
+    /// by element, as `IF`, `IFERROR`, `IFNA`, `INDEX`, and `XLOOKUP` do, or reads them whole, as
+    /// `TYPE` does, rather than returning an array of its own.
     pub(in crate::calculation) const fn reads_value_arrays(self) -> bool {
         matches!(
             self,
@@ -786,6 +805,9 @@ impl ArrayEvaluator {
                     | LegacyArrayFunction::IfNa
                     | LegacyArrayFunction::Index
             ) | Self::Type
+                | Self::XLookup
+                | Self::OrderStatistic(_)
+                | Self::Selection(_)
         )
     }
 }
@@ -803,6 +825,8 @@ impl ArrayEvaluator {
             Self::ModernText(value) => format!("modern_text:{}", value.stable_name()),
             Self::Grouped(value) => format!("grouped:{}", value.stable_name()),
             Self::XLookup => "lookup:xlookup".to_owned(),
+            Self::OrderStatistic(value) => format!("statistical:{}", value.stable_name()),
+            Self::Selection(value) => format!("selection:{}", value.stable_name()),
         }
     }
 
@@ -827,6 +851,13 @@ impl ArrayEvaluator {
         );
         evaluators.extend(GroupedArrayFunction::ALL.iter().copied().map(Self::Grouped));
         evaluators.push(Self::XLookup);
+        evaluators.extend(
+            OrderStatisticFunction::ALL
+                .iter()
+                .copied()
+                .map(Self::OrderStatistic),
+        );
+        evaluators.extend(SelectionFunction::ALL.iter().copied().map(Self::Selection));
         evaluators
     }
 }

@@ -343,6 +343,70 @@ pub(super) fn required_text(
     super::super::coerce::to_text(&engine.eval_scalar(context, expr))
 }
 
+/// The values an `ARRAY`-mode argument holds, read by row-major position. A reference reads its
+/// cells when asked, so a whole column holds every row and those past its populated end are blank.
+pub(super) enum ArgumentCells {
+    Reference(Vec<Rect>),
+    Values(Vec<Value>),
+}
+
+impl ArgumentCells {
+    pub(super) fn read(
+        engine: &Engine<'_>,
+        context: EvalContext<'_>,
+        expr: &Expr,
+    ) -> Result<Self, ErrorKind> {
+        let reference = if super::legacy::is_index_over_arrays(engine, context, expr) {
+            Err(ErrorKind::Value)
+        } else {
+            engine.resolve_reference_value_expr(context, expr)
+        };
+        match reference {
+            Ok(super::super::runtime::ReferenceValue::Empty) => Err(ErrorKind::Ref),
+            Ok(reference) if reference.has_sheet_span() => Err(ErrorKind::Unsupported),
+            Ok(reference) => Ok(Self::Reference(reference.rects().collect())),
+            Err(kind) if kind.is_engine_issue() => Err(kind),
+            Err(_) => Ok(Self::Values(engine.eval_array(context, expr)?.data)),
+        }
+    }
+
+    /// The number of values, at least one; `get` reads positions below it.
+    pub(super) fn len(&self) -> u64 {
+        match self {
+            Self::Reference(rects) => rects.iter().map(|rect| rect.height() * rect.width()).sum(),
+            Self::Values(values) => values.len() as u64,
+        }
+    }
+
+    pub(super) fn get(
+        &self,
+        engine: &Engine<'_>,
+        context: EvalContext<'_>,
+        index: u64,
+    ) -> Result<Value, ErrorKind> {
+        match self {
+            Self::Values(values) => usize::try_from(index)
+                .ok()
+                .and_then(|index| values.get(index))
+                .cloned()
+                .ok_or(ErrorKind::Ref),
+            Self::Reference(rects) => {
+                let mut index = index;
+                for rect in rects {
+                    let cells = rect.height() * rect.width();
+                    if index < cells {
+                        let row = rect.row_start + (index / rect.width()) as u32;
+                        let col = rect.col_start + (index % rect.width()) as u32;
+                        return engine.read_reference_cell(context, (rect.sheet, row, col));
+                    }
+                    index -= cells;
+                }
+                Err(ErrorKind::Ref)
+            }
+        }
+    }
+}
+
 /// Whether Excel's fifteen-significant-digit rules apply: rounding reads a scaled quotient to
 /// fifteen digits and comparison treats numbers that differ only past them as equal. Under
 /// `ArithmeticSemantics::Ieee754` both use the binary values as they are.

@@ -1,7 +1,9 @@
 use super::super::ast::Expr;
 use super::super::coerce::{logical_text, to_logical, values_equal};
 use super::super::eval::{Engine, EvalContext};
+use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
+use super::elementwise::Pick;
 use super::kernel::LogicalFunction;
 use super::util::{collect_argument_values, fifteen_digit_rules};
 
@@ -96,6 +98,85 @@ fn ifna(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         Value::Error(kind) if kind.is_engine_issue() => Value::Error(kind),
         Value::Error(ErrorKind::NA) => engine.eval_scalar(context, &args[1]),
         value => value,
+    }
+}
+
+/// `IFS` in an array context: conditions that hold arrays pick per element, and the picked values
+/// are arrays.
+pub(super) fn ifs_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    if args.len() < 2 || !args.len().is_multiple_of(2) {
+        return Err(ErrorKind::Value);
+    }
+    let conditions = args
+        .chunks_exact(2)
+        .map(|pair| evaluated_array(engine, context, &pair[0]))
+        .collect::<Result<Vec<_>, _>>()?;
+    super::elementwise::select(engine, context, args, &conditions, |elements| {
+        for (pair, condition) in elements.iter().enumerate() {
+            match to_logical(condition) {
+                Ok(true) => return Pick::Argument(2 * pair + 1),
+                Ok(false) => {}
+                Err(kind) => return Pick::Value(Value::Error(kind)),
+            }
+        }
+        Pick::Value(Value::Error(ErrorKind::NA))
+    })
+}
+
+/// `SWITCH` in an array context: an expression or values that hold arrays pick per element, and
+/// the picked results are arrays.
+pub(super) fn switch_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    if args.len() < 3 {
+        return Err(ErrorKind::Value);
+    }
+    let pair_end = if args.len().is_multiple_of(2) {
+        args.len() - 1
+    } else {
+        args.len()
+    };
+    let mut selectors = vec![evaluated_array(engine, context, &args[0])?];
+    for pair in args[1..pair_end].chunks_exact(2) {
+        selectors.push(evaluated_array(engine, context, &pair[0])?);
+    }
+    let fifteen_digits = fifteen_digit_rules(engine);
+    super::elementwise::select(engine, context, args, &selectors, |elements| {
+        let target = elements[0];
+        if let Value::Error(kind) = target {
+            return Pick::Value(Value::Error(*kind));
+        }
+        for (pair, candidate) in elements[1..].iter().enumerate() {
+            match values_equal(target, candidate, fifteen_digits) {
+                Ok(true) => return Pick::Argument(2 * pair + 2),
+                Ok(false) => {}
+                Err(kind) => return Pick::Value(Value::Error(kind)),
+            }
+        }
+        if pair_end < args.len() {
+            Pick::Argument(pair_end)
+        } else {
+            Pick::Value(Value::Error(ErrorKind::NA))
+        }
+    })
+}
+
+/// The array `expr` evaluates to; its own error is a one-cell array.
+fn evaluated_array(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    expr: &Expr,
+) -> Result<Array, ErrorKind> {
+    match engine.eval_array(context, expr) {
+        Ok(array) => Ok(array),
+        Err(kind) if kind.is_engine_issue() => Err(kind),
+        Err(kind) => Ok(Array::scalar(Value::Error(kind))),
     }
 }
 

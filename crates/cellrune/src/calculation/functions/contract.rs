@@ -1364,7 +1364,7 @@ impl TextFunction {
             Self::Concat => CallContract::uniform(Arity::range(1, MAX_CONCAT_ARGUMENTS), ARRAY),
             Self::TextJoin => CallContract::repeating(
                 Arity::range(3, MAX_TEXT_JOIN_ARGUMENTS),
-                &[SCALAR, SCALAR],
+                &[ARRAY, SCALAR],
                 &[ARRAY],
                 &[],
             ),
@@ -1405,7 +1405,7 @@ impl TextAdditionalFunction {
                 .with_defaults(FIXED_DEFAULTS),
             Self::TextAfter | Self::TextBefore => CallContract::positional(
                 Arity::range(2, 6),
-                &[SCALAR, SCALAR, SCALAR, SCALAR, SCALAR, DEFERRED],
+                &[SCALAR, ARRAY, SCALAR, SCALAR, SCALAR, DEFERRED],
             )
             .with_defaults(TEXT_BOUNDARY_DEFAULTS),
             Self::ValueToText => CallContract::positional(Arity::range(1, 2), &[SCALAR, SCALAR])

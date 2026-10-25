@@ -5,7 +5,7 @@ use super::super::limits::CalculationLimitKind;
 use super::super::value::{ErrorKind, Value};
 use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::TextFunction;
-use super::util::{collect_argument_values, required_number, required_text};
+use super::util::{ArgumentCells, collect_argument_values, required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -459,8 +459,9 @@ fn textjoin(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
     if args.len() < 3 {
         return Value::Error(ErrorKind::Value);
     }
-    let delimiter = match required_text(engine, context, &args[0]) {
-        Ok(text) => text,
+    // A delimiter holding several values is used cyclically, one per join.
+    let delimiters = match ArgumentCells::read(engine, context, &args[0]) {
+        Ok(cells) => cells,
         Err(kind) => return Value::Error(kind),
     };
     let ignore_empty = match to_logical(&engine.eval_scalar(context, &args[1])) {
@@ -472,12 +473,22 @@ fn textjoin(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         Err(kind) => return Value::Error(kind),
     };
     let mut result = String::new();
-    let mut has_part = false;
+    let mut parts = 0_u64;
     for item in values {
         match to_text(&item.value) {
             Ok(text) if ignore_empty && text.is_empty() => {}
             Ok(text) => {
-                let delimiter_bytes = if has_part { delimiter.len() } else { 0 };
+                let delimiter = match parts.checked_sub(1) {
+                    None => String::new(),
+                    Some(joins) => match delimiters
+                        .get(engine, context, joins % delimiters.len())
+                        .and_then(|value| to_text(&value))
+                    {
+                        Ok(delimiter) => delimiter,
+                        Err(kind) => return Value::Error(kind),
+                    },
+                };
+                let delimiter_bytes = delimiter.len();
                 let Some(output_bytes) = result
                     .len()
                     .checked_add(delimiter_bytes)
@@ -488,11 +499,9 @@ fn textjoin(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
                 if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
                     return Value::Error(kind);
                 }
-                if has_part {
-                    result.push_str(&delimiter);
-                }
+                result.push_str(&delimiter);
                 result.push_str(&text);
-                has_part = true;
+                parts += 1;
             }
             Err(kind) => return Value::Error(kind),
         }

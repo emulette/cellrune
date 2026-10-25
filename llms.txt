@@ -1564,8 +1564,9 @@ than guessing a name from a different XLSX crate (`calamine`,
 - The four 0.1.16 official names are `DATEVALUE`, `TIMEVALUE`,
   `NETWORKDAYS.INTL`, and `WORKDAY.INTL`. `XLOOKUP` is now implemented and is
   marked `.returns_array()`. It accepts a one-dimensional lookup vector and a
-  matching-axis return range; the array result is the matching row (vertical
-  lookup) or column (horizontal lookup). It supports exact, next-smaller,
+  matching-axis return range, as references or arrays; the array result is the
+  matching row (vertical lookup) or column (horizontal lookup). It supports
+  exact, next-smaller,
   next-larger, and linear wildcard matching, plus forward, reverse, ascending
   binary, and descending binary search. Binary search assumes correctly sorted
   caller input and wildcard mode rejects binary search. `if_not_found` is lazy
@@ -1859,6 +1860,26 @@ than guessing a name from a different XLSX crate (`calamine`,
   Row, column, or area indexes that hold arrays select one value per element
   (`INDEX(A1:C3,{1;3},{1,2})` is a 2-by-2 array, `SUM` of it adds four
   cells); an element selecting a whole row or column takes its first cell.
+  A reference of several rows and columns needs its column (`INDEX(A1:B3,2)`
+  is `#REF!`). `INDEX` also selects from an array constant or a computed
+  array, where one index picks from a row or column (`INDEX({10,20,30},2)` is
+  20) and a two-dimensional array without a column picks a whole row
+  (`INDEX({10,20;30,40},2)` is `{30,40}`).
+- `ROWS` and `COLUMNS` count an array's or a single value's dimensions
+  (`ROWS({1;2;3})` is 3, `ROWS(1)` is 1). `MATCH`, `VLOOKUP`, `HLOOKUP`, and
+  `XLOOKUP` search array constants and computed arrays as they search
+  references (`INDEX(C1:C3,MATCH(1,(A1:A3="b")*(B1:B3=2),0))`,
+  `VLOOKUP(2,{1,"a";2,"b"},2,FALSE)`); a `MATCH` lookup array of several rows
+  and columns is `#N/A`. An array of lookup values looks each one up in an
+  array context (`MATCH({4,9},{1,4,9},0)` is `{2,3}`); for `XLOOKUP` an
+  element whose result is a whole row or column is
+  `calculation.unsupported_expression`. As in `MATCH`, `XLOOKUP`'s exact
+  search matches a number with number cells only.
+- `IF` and `CHOOSE` return the reference they select when their condition or
+  index is one value (`ISREF(IF(TRUE,A1))` is `TRUE`), so aggregates over
+  them pass over text and logical values as in any reference
+  (`SUM(IF(TRUE,A1))` with the text `5` in A1 is 0). `AND` reads every
+  element of an array argument, as `OR` and `XOR` do.
 - A function that takes a value where an array arrives is called once per
   element in an array context — a dynamic array formula, an array formula, or
   an argument that takes an array such as those of `SUM` and `SUMPRODUCT` —
@@ -1869,16 +1890,29 @@ than guessing a name from a different XLSX crate (`calamine`,
   argument (`LEFT("abc",B1:B2)` with `B1` blank gives `""` there). The value
   of a formula that is not an array formula intersects a range implicitly, as
   before, and takes an array constant's first element (`=LEN({"a","bb"})` is
-  1). `TYPE` is 64 for an array or a range of several cells in an array
-  context and for an array constant. `IFERROR` and `IFNA` take arrays element
-  by element (`{=SUM(IFERROR(1/A1:A3,0))}`). A function without established
-  array rules — one that returns an array or a reference of its own, such as
-  `SEQUENCE`, `OFFSET`, and `XLOOKUP` — is
+  1). `TYPE` is 64 for an array value of any size (`TYPE({1})`,
+  `TYPE({1,2}*1)`) and for a range of several cells in an array context.
+  `IFERROR` and `IFNA` take arrays element by element
+  (`{=SUM(IFERROR(1/A1:A3,0))}`) and broadcast an array value against their
+  fallback (`IFERROR({1,2},{7;8})` is 2 by 2). `CHOOSE`, `IFS`, and `SWITCH`
+  select element by element (`CHOOSE({1,2},B1:B3,A1:A3)` is 3 by 2). A
+  function without established array rules — one that returns an array or a
+  reference of its own, such as `SEQUENCE` and `OFFSET` — is
   `calculation.unsupported_expression` when a value argument holds an array
-  value; a range there keeps implicit intersection. The function catalog's
+  value, including a `LET` name bound to one; a range there keeps implicit
+  intersection. So is an `INDEX` whose indexes hold arrays where a reference
+  is needed (`COUNTIF(INDEX(A1:A3,{1,2}),1)`), while its value is read element
+  by element. Functions from the Analysis ToolPak (`EOMONTH`, `EDATE`,
+  `WORKDAY`, `QUOTIENT`, `RANDBETWEEN`, the base conversions, the
+  fixed-income functions, …) return `#VALUE!` for a range of several cells in
+  a value argument in every formula and take a computed array element by
+  element (`EOMONTH(A1:A3+0,0)`). `TEXTJOIN` uses a delimiter holding several
+  values in turn (`TEXTJOIN({"-","+"},TRUE,"a","b","c")` is `"a-b+c"`);
+  `TEXTBEFORE` and `TEXTAFTER` with several delimiters are
+  `calculation.unsupported_expression`. The function catalog's
   `.returns_array()` marks functions with array results of their own (`IF`,
-  `IFERROR`, `IFNA`, `INDEX`, `FILTER`, …), not those that only take arrays
-  element by element.
+  `IFERROR`, `IFNA`, `CHOOSE`, `IFS`, `SWITCH`, `INDEX`, `XLOOKUP`, `FILTER`,
+  …), not those that only take arrays element by element.
 - Unary and binary array operators containing whole-column references resolve
   one common row extent from the greatest populated row among the columns
   those operands reference, with a one-row minimum on an otherwise empty

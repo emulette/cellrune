@@ -120,7 +120,8 @@ fn if_array(
 
 /// `IFERROR`, or `IFNA` with `only_na`, over arrays: each element of the value that is an error,
 /// or `#N/A` for `IFNA`, takes the fallback's element, so `{=SUM(IFERROR(1/A1:A3,0))}` adds the
-/// reciprocals that exist. The fallback is evaluated only when an element needs it.
+/// reciprocals that exist. The fallback is evaluated for an array value, which takes its shape,
+/// and for a single value only when that value is caught; an error evaluating it is its value.
 fn if_error_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -146,10 +147,16 @@ fn if_error_array(
     {
         return Err(*kind);
     }
-    if !value.data.iter().any(caught) {
+    // An array value broadcasts against the fallback even when it holds no error (Mac Excel 16.114
+    // `IFERROR({1,2},{7;8})` is 2x2), while a single value that is not caught stands alone.
+    if value.is_scalar() && !value.data.iter().any(caught) {
         return Ok(value);
     }
-    let fallback = engine.eval_array(context, fallback)?;
+    let fallback = match engine.eval_array(context, fallback) {
+        Ok(fallback) => fallback,
+        Err(kind) if kind.is_engine_issue() => return Err(kind),
+        Err(kind) => Array::scalar(Value::Error(kind)),
+    };
     let (rows, cols) = broadcast_shape(&value, &fallback)?;
     let cells = u64::from(rows) * u64::from(cols);
     engine.ensure_array_cells(cells)?;
@@ -265,8 +272,35 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
             }
             continue;
         }
-        let value = engine.eval_scalar(context, arg);
-        if reference_rect(engine, context, arg).is_ok() {
+        let is_reference = reference_rect(engine, context, arg).is_ok();
+        let value = if !is_reference && super::elementwise::may_hold_array(engine, context, arg) {
+            match engine.eval_array(context, arg) {
+                // An array's elements take part as a range's cells do: `AND({TRUE,FALSE})` is
+                // `FALSE` (Mac Excel 16.114).
+                Ok(array) if !array.is_scalar() => {
+                    for value in array.data {
+                        match value {
+                            Value::Error(kind) => return Value::Error(kind),
+                            Value::Number(number) => {
+                                participants += 1;
+                                all_true &= number != 0.0;
+                            }
+                            Value::Logical(logical) => {
+                                participants += 1;
+                                all_true &= logical;
+                            }
+                            Value::Text(_) | Value::Blank => {}
+                        }
+                    }
+                    continue;
+                }
+                Ok(array) => array.data.into_iter().next().unwrap_or(Value::Blank),
+                Err(kind) => return Value::Error(kind),
+            }
+        } else {
+            engine.eval_scalar(context, arg)
+        };
+        if is_reference {
             // Text in a referenced cell takes no part, `TRUE` included, as in a range: with A1
             // holding the text `x`, `AND(A1,TRUE)` is `TRUE` and `AND(A1)` is `#VALUE!` (Mac Excel
             // 16.114).
@@ -546,17 +580,100 @@ fn kernel_sumproduct(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr
 }
 
 fn kernel_index(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
-    engine
-        .resolve_index_rect(context, args)
-        .and_then(|rect| engine.implicit_intersection_rect(context, rect))
-        .and_then(|rect| {
-            engine.read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
-        })
-        .unwrap_or_else(Value::Error)
+    match index_source(engine, context, args) {
+        // A selection of several values takes its first, as a formula that is not an array
+        // formula takes an array's.
+        Ok(Some(values)) => select_from_values(engine, context, &values, args)
+            .map_or_else(Value::Error, |selected| selected.data[0].clone()),
+        Ok(None) => engine
+            .resolve_index_rect(context, args)
+            .and_then(|rect| engine.implicit_intersection_rect(context, rect))
+            .and_then(|rect| {
+                engine.read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
+            })
+            .unwrap_or_else(Value::Error),
+        Err(kind) => Value::Error(kind),
+    }
 }
 
-/// Whether `expr` is an `INDEX` call whose row, column, or area index holds an array, which selects
-/// an array of values rather than one reference.
+/// The values `INDEX` selects from when its first argument is not a reference, such as an array
+/// constant or a computed array; `None` for a reference.
+fn index_source(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> Result<Option<Array>, ErrorKind> {
+    let Some(source) = args.first() else {
+        return Err(ErrorKind::Value);
+    };
+    match engine.resolve_reference_value_expr(context, source) {
+        Ok(_) => Ok(None),
+        Err(kind) if kind.is_engine_issue() => Err(kind),
+        Err(_) => engine.eval_array(context, source).map(Some),
+    }
+}
+
+/// Selects from an array of values as `INDEX` does (Mac Excel 16.114): one index picks from a row
+/// or a column (`INDEX({10,20,30},2)` is 20), and a two-dimensional array without a column picks a
+/// whole row (`INDEX({10,20;30,40},2)` is `{30,40}`), where a reference of several rows and columns
+/// needs its column. A zero index selects every row or column, and one past the array is `#REF!`.
+fn select_from_values(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    values: &Array,
+    args: &[Expr],
+) -> Result<Array, ErrorKind> {
+    let index = |position: usize| -> Result<Option<f64>, ErrorKind> {
+        match args.get(position) {
+            None | Some(Expr::Missing) => Ok(None),
+            Some(expr) => to_number(&engine.eval_scalar(context, expr), engine.numeric_text())
+                .map(|number| Some(number.trunc())),
+        }
+    };
+    let first = index(1)?.unwrap_or(0.0);
+    let second = index(2)?;
+    if index(3)?.is_some_and(|area| area != 1.0) {
+        return Err(ErrorKind::Ref);
+    }
+    let (row, column) = match second {
+        None if values.rows == 1 => (0.0, first),
+        None if values.cols == 1 => (first, 0.0),
+        None => (first, 0.0),
+        Some(second) => (first, second),
+    };
+    if row < 0.0 || column < 0.0 {
+        return Err(ErrorKind::Value);
+    }
+    if row > f64::from(values.rows) || column > f64::from(values.cols) {
+        return Err(ErrorKind::Ref);
+    }
+    let rows = if row == 0.0 {
+        0..values.rows
+    } else {
+        row as u32 - 1..row as u32
+    };
+    let columns = if column == 0.0 {
+        0..values.cols
+    } else {
+        column as u32 - 1..column as u32
+    };
+    let data = rows
+        .clone()
+        .flat_map(|row| {
+            columns
+                .clone()
+                .map(move |column| values.at(row, column).clone())
+        })
+        .collect();
+    Ok(Array {
+        rows: rows.len() as u32,
+        cols: columns.len() as u32,
+        data,
+    })
+}
+
+/// Whether `expr` is an `INDEX` call whose row, column, or area index holds several values, which
+/// selects an array of values rather than one reference.
 pub(super) fn is_index_over_arrays(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -572,10 +689,25 @@ pub(super) fn is_index_over_arrays(
                 && super::function_evaluator(name)
                     == Some(super::Evaluator::Legacy(LegacyFunction::Index)) =>
         {
-            !super::elementwise::lifted_positions(engine, context, args, 1..args.len()).is_empty()
+            index_has_arrays(engine, context, args)
         }
         _ => false,
     }
+}
+
+/// Whether a row, column, or area index of `INDEX` evaluates to more than one value.
+pub(super) fn index_has_arrays(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+) -> bool {
+    super::elementwise::lifted_positions(engine, context, args, 1..args.len())
+        .into_iter()
+        .any(|index| {
+            engine
+                .eval_array(context, &args[index])
+                .is_ok_and(|array| !array.is_scalar())
+        })
 }
 
 /// `INDEX` in an array context. Row, column, or area indexes that hold arrays select one value per
@@ -586,19 +718,35 @@ fn index_array(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
+    let values = index_source(engine, context, args)?;
     let lifted = super::elementwise::lifted_positions(engine, context, args, 1..args.len());
-    if lifted.is_empty() {
-        let rect = engine.resolve_index_rect(context, args)?;
-        return engine.array_from_rect(context, &args[0], rect);
+    let lifting = super::elementwise::Lifting {
+        lifted: &lifted,
+        once: &[],
+        only_several: true,
+    };
+    let selected =
+        super::elementwise::lift(engine, context, args, args, &lifting, |context, args, _| {
+            let selected = match &values {
+                Some(values) => select_from_values(engine, context, values, args)
+                    .map(|selected| selected.data[0].clone()),
+                None => engine.resolve_index_rect(context, args).and_then(|rect| {
+                    engine
+                        .read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
+                }),
+            };
+            selected.unwrap_or_else(Value::Error)
+        })?;
+    if let Some(selected) = selected {
+        return Ok(selected);
     }
-    super::elementwise::lift(engine, context, args, args, &lifted, |context, args, _| {
-        engine
-            .resolve_index_rect(context, args)
-            .and_then(|rect| {
-                engine.read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
-            })
-            .unwrap_or_else(Value::Error)
-    })
+    match values {
+        Some(values) => select_from_values(engine, context, &values, args),
+        None => {
+            let rect = engine.resolve_index_rect(context, args)?;
+            engine.array_from_rect(context, &args[0], rect)
+        }
+    }
 }
 
 fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -609,13 +757,35 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     if let Value::Error(kind) = lookup {
         return Value::Error(kind);
     }
-    let rect = match reference_rect(engine, context, &args[1]) {
-        Ok(rect) => rect,
-        Err(kind) => return Value::Error(kind),
+    // A reference keeps its lookup index; an array constant or a computed array is searched as it
+    // is, as `MATCH(1,(A1:A3="b")*(B1:B3=2),0)` searches in Excel.
+    let source = match reference_rect(engine, context, &args[1]) {
+        Ok(rect) => MatchSource::Rect(rect),
+        Err(kind) if kind.is_engine_issue() => return Value::Error(kind),
+        Err(_) => match engine.eval_array(context, &args[1]) {
+            Ok(array) => MatchSource::Array(array),
+            Err(kind) => return Value::Error(kind),
+        },
     };
-    if rect.height() > 1 && rect.width() > 1 {
-        return Value::Error(ErrorKind::Unsupported);
-    }
+    // A lookup array of several rows and columns is `#N/A` (Mac Excel 16.114).
+    let (vertical, length) = match &source {
+        MatchSource::Rect(rect) if rect.height() > 1 && rect.width() > 1 => {
+            return Value::Error(ErrorKind::NA);
+        }
+        MatchSource::Array(array) if array.rows > 1 && array.cols > 1 => {
+            return Value::Error(ErrorKind::NA);
+        }
+        MatchSource::Rect(rect) => {
+            let vertical = rect.width() == 1;
+            let length = if vertical {
+                engine.operation_row_count([rect])
+            } else {
+                rect.width()
+            };
+            (vertical, length)
+        }
+        MatchSource::Array(array) => (array.cols == 1, array.data.len() as u64),
+    };
     // Excel selects the mode by sign, so any positive type behaves as 1 and any negative as -1.
     let match_type = match args.get(2) {
         Some(expr) => match to_number(&engine.eval_scalar(context, expr), engine.numeric_text()) {
@@ -639,81 +809,152 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     } else {
         None
     };
-    let vertical = rect.width() == 1;
-    let length = if vertical {
-        engine.operation_row_count([&rect])
-    } else {
-        rect.width()
-    };
     if let Err(kind) = engine.ensure_array_cells(length) {
         return Value::Error(kind);
     }
-    let cell = |offset: u64| {
-        if vertical {
-            (rect.sheet, rect.row_start + offset as u32, rect.col_start)
-        } else {
-            (rect.sheet, rect.row_start, rect.col_start + offset as u32)
+    let found = match source {
+        MatchSource::Array(array) => {
+            scan_match(
+                &mut matcher,
+                criterion.as_ref(),
+                &lookup,
+                match_type,
+                length,
+                |offset| Ok(array.data[offset as usize].clone()),
+            )
+            .found
+        }
+        MatchSource::Rect(rect) => {
+            let search = MatchSearch {
+                criterion: criterion.as_ref(),
+                lookup: &lookup,
+                match_type,
+                length,
+            };
+            match_in_rect(engine, context, rect, vertical, &search, &mut matcher)
         }
     };
-    if let Some(criterion) = &criterion {
-        let area = LookupArea::new(rect, length, !vertical);
-        let found = match area.and_then(|area| indexed_match_offset(engine, context, area, &lookup))
-        {
-            Some(found) => found,
-            None => {
-                let found = (|| {
-                    let mut stored = engine.rect_cells(&rect, rect.row_end);
-                    for offset in 0..length {
-                        let cell = cell(offset);
-                        let value = engine.read_stored_reference_cell(
-                            context,
-                            cell,
-                            stored.at(cell.1, cell.2),
-                        )?;
-                        if matcher.matches(criterion, &value)? {
-                            return Ok(offset as u32);
-                        }
-                    }
-                    Err(ErrorKind::NA)
-                })();
-                if let Some(area) = area {
-                    record_linear_search(engine, area, SearchDirection::Forward, &found);
-                }
-                found
-            }
-        };
-        return match found {
-            Ok(offset) => Value::Number(f64::from(offset + 1)),
-            Err(kind) => Value::Error(kind),
-        };
+    match found {
+        Ok(offset) => Value::Number(f64::from(offset + 1)),
+        Err(kind) => Value::Error(kind),
     }
-    let area = LookupArea::new(rect, length, !vertical);
-    if let Some(found) = area.and_then(|area| {
-        indexed_approximate_match_offset(engine, context, area, &lookup, match_type == -1.0)
-    }) {
-        return match found {
-            Ok(offset) => Value::Number(f64::from(offset + 1)),
-            Err(kind) => Value::Error(kind),
+}
+
+/// Where `MATCH` looks: a reference, or an array of values.
+enum MatchSource {
+    Rect(Rect),
+    Array(Array),
+}
+
+/// What `MATCH` looks for, and how far.
+struct MatchSearch<'search> {
+    /// The exact equality of match type 0; `None` for the approximate types.
+    criterion: Option<&'search CompiledCriteria>,
+    lookup: &'search Value,
+    match_type: f64,
+    length: u64,
+}
+
+/// Searches a one-row or one-column reference, through its lookup index when it has one.
+fn match_in_rect(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    rect: Rect,
+    vertical: bool,
+    search: &MatchSearch<'_>,
+    matcher: &mut CriteriaRuntime<'_, '_, '_>,
+) -> Result<u32, ErrorKind> {
+    let area = LookupArea::new(rect, search.length, !vertical);
+    let indexed = area.and_then(|area| match search.criterion {
+        Some(_) => indexed_match_offset(engine, context, area, search.lookup),
+        None => indexed_approximate_match_offset(
+            engine,
+            context,
+            area,
+            search.lookup,
+            search.match_type == -1.0,
+        ),
+    });
+    if let Some(found) = indexed {
+        return found;
+    }
+    let mut stored = engine.rect_cells(&rect, rect.row_end);
+    let scan = scan_match(
+        matcher,
+        search.criterion,
+        search.lookup,
+        search.match_type,
+        search.length,
+        |offset| {
+            let cell = if vertical {
+                (rect.sheet, rect.row_start + offset as u32, rect.col_start)
+            } else {
+                (rect.sheet, rect.row_start, rect.col_start + offset as u32)
+            };
+            engine.read_stored_reference_cell(context, cell, stored.at(cell.1, cell.2))
+        },
+    );
+    if let Some(area) = area {
+        record_linear_search(engine, area, SearchDirection::Forward, &scan.reads);
+    }
+    scan.found
+}
+
+/// The offset a linear `MATCH` finds, and how far it read, which the lookup statistics record.
+struct MatchScan {
+    found: Result<u32, ErrorKind>,
+    reads: Result<u32, ErrorKind>,
+}
+
+/// Reads `length` values through `value_at` as `MATCH` does: the first equal value for match type
+/// 0, otherwise the last value on the matching side before the order turns, passing over errors.
+fn scan_match(
+    matcher: &mut CriteriaRuntime<'_, '_, '_>,
+    criterion: Option<&CompiledCriteria>,
+    lookup: &Value,
+    match_type: f64,
+    length: u64,
+    mut value_at: impl FnMut(u64) -> Result<Value, ErrorKind>,
+) -> MatchScan {
+    if let Some(criterion) = criterion {
+        let found = (|| {
+            for offset in 0..length {
+                if matcher.matches(criterion, &value_at(offset)?)? {
+                    return Ok(offset as u32);
+                }
+            }
+            Err(ErrorKind::NA)
+        })();
+        return MatchScan {
+            reads: found,
+            found,
         };
     }
     let mut approximate = None;
     let mut equal = None;
     let mut stop = None;
-    let mut stored = engine.rect_cells(&rect, rect.row_end);
     for offset in 0..length {
-        let cell = cell(offset);
-        let value =
-            match engine.read_stored_reference_cell(context, cell, stored.at(cell.1, cell.2)) {
-                Ok(value) => value,
-                Err(kind) => return Value::Error(kind),
-            };
+        let value = match value_at(offset) {
+            Ok(value) => value,
+            Err(kind) => {
+                return MatchScan {
+                    found: Err(kind),
+                    reads: Err(kind),
+                };
+            }
+        };
         // Approximate matching passes over error cells, as Excel does.
         if matches!(value, Value::Error(_)) {
             continue;
         }
-        let ordering = match matcher.compare(&value, &lookup) {
+        let ordering = match matcher.compare(&value, lookup) {
             Ok(ordering) => ordering,
-            Err(kind) => return Value::Error(kind),
+            Err(kind) => {
+                return MatchScan {
+                    found: Err(kind),
+                    reads: Err(kind),
+                };
+            }
         };
         if ordering == std::cmp::Ordering::Equal {
             stop = Some(Ok(offset as u32));
@@ -731,13 +972,11 @@ fn kernel_match(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
             break;
         }
     }
-    if let Some(area) = area {
-        let reads = stop.unwrap_or(Err(ErrorKind::NA));
-        record_linear_search(engine, area, SearchDirection::Forward, &reads);
+    MatchScan {
+        found: equal
+            .or(approximate)
+            .map(|offset| offset as u32)
+            .ok_or(ErrorKind::NA),
+        reads: stop.unwrap_or(Err(ErrorKind::NA)),
     }
-    equal
-        .or(approximate)
-        .map_or(Value::Error(ErrorKind::NA), |offset| {
-            Value::Number((offset + 1) as f64)
-        })
 }

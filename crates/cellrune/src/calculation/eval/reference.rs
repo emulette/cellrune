@@ -10,8 +10,8 @@ use crate::calculation::functions::descriptor::{DependencyKind, DynamicReference
 use crate::calculation::functions::kernel::{LegacyFunction, LookupFunction};
 use crate::calculation::functions::{
     DynamicFunction, Evaluator, callable_call_scope, evaluator_value_argument_holds_array,
-    function_call_shape_is_valid, function_dependency_kind, function_evaluator, let_reference,
-    prepare_evaluator_arguments,
+    function_call_shape_is_valid, function_dependency_kind, function_evaluator,
+    index_arguments_hold_arrays, let_reference, may_hold_array, prepare_evaluator_arguments,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::parse_formula_with_limits;
@@ -288,6 +288,8 @@ impl Engine<'_> {
                         == Some(Evaluator::Dynamic(DynamicFunction::Let))
                     {
                         let_reference(self, context, args)?
+                    } else if let Some(branch) = self.selected_branch(context, name, args) {
+                        self.resolve_reference_value_expr(context, branch?)?
                     } else {
                         ReferenceValue::from_rect(self.resolve_rect_expr(context, expr)?)
                     }
@@ -406,9 +408,19 @@ impl Engine<'_> {
                     {
                         return Err(ErrorKind::Value);
                     }
+                    if let Some(branch) = self.selected_branch(context, name, args) {
+                        return self.resolve_rect_expr(context, branch?);
+                    }
                     match function_evaluator(name) {
                         Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
                             let_reference(self, context, args)?.into_single_rect()
+                        }
+                        // Indexes holding arrays select a reference per element, which one rect
+                        // cannot hold.
+                        Some(Evaluator::Legacy(LegacyFunction::Index))
+                            if index_arguments_hold_arrays(context, args) =>
+                        {
+                            Err(ErrorKind::Unsupported)
                         }
                         Some(Evaluator::Legacy(LegacyFunction::Index)) => {
                             self.resolve_index_rect(context, args)
@@ -423,6 +435,60 @@ impl Engine<'_> {
                 }
                 _ => Err(ErrorKind::Value),
             }
+        })
+    }
+
+    /// The argument `IF` or `CHOOSE` returns, which is a reference when it is written as one:
+    /// Excel takes `IF(TRUE,A1)` and `CHOOSE(1,A1)` as references (`ISREF(IF(TRUE,A1))` is `TRUE`,
+    /// and `SUM(IF(TRUE,A1))` passes over text in `A1`, Mac Excel 16.114). `None` for other calls.
+    fn selected_branch<'args>(
+        &self,
+        context: EvalContext<'_>,
+        name: &str,
+        args: &'args [Expr],
+    ) -> Option<Result<&'args Expr, ErrorKind>> {
+        let evaluator = function_evaluator(name)?;
+        if !matches!(
+            evaluator,
+            Evaluator::Legacy(LegacyFunction::If) | Evaluator::Lookup(LookupFunction::Choose)
+        ) {
+            return None;
+        }
+        // A condition or index that holds an array selects element by element, an array of
+        // values rather than one reference.
+        if args
+            .first()
+            .is_some_and(|selector| may_hold_array(self, context, selector))
+        {
+            return Some(Err(ErrorKind::Value));
+        }
+        let selected = match evaluator {
+            Evaluator::Legacy(LegacyFunction::If) => {
+                let condition = args
+                    .first()
+                    .map(|condition| self.eval_scalar(context, condition));
+                match condition.map(|condition| to_logical(&condition)) {
+                    Some(Ok(true)) => args.get(1),
+                    Some(Ok(false)) => args.get(2),
+                    Some(Err(kind)) => return Some(Err(kind)),
+                    None => None,
+                }
+            }
+            Evaluator::Lookup(LookupFunction::Choose) => {
+                let index = args
+                    .first()
+                    .map(|index| to_number(&self.eval_scalar(context, index), self.numeric_text()));
+                match index {
+                    Some(Ok(index)) if index >= 1.0 => args.get(index.trunc() as usize),
+                    Some(Err(kind)) => return Some(Err(kind)),
+                    _ => None,
+                }
+            }
+            _ => return None,
+        };
+        Some(match selected {
+            Some(Expr::Missing) | None => Err(ErrorKind::Value),
+            Some(branch) => Ok(branch),
         })
     }
 
@@ -457,6 +523,11 @@ impl Engine<'_> {
             }
         };
         let single_row = rect.height() == 1 && rect.width() > 1;
+        // A reference of several rows and columns needs its column: `INDEX(A1:B3,2)` is `#REF!`
+        // (Mac Excel 16.114).
+        if second_index.is_none() && rect.height() > 1 && rect.width() > 1 {
+            return Err(ErrorKind::Ref);
+        }
         let (row_index, col_index) = if single_row && second_index.is_none() {
             (1.0, first_index)
         } else {
@@ -506,7 +577,7 @@ impl Engine<'_> {
         let context = context.with_arguments(args);
         // A reference array (`OFFSET(A1,{0;1},0)`) is not modeled; reading the first element
         // would answer for one reference.
-        if evaluator_value_argument_holds_array(evaluator, args) {
+        if evaluator_value_argument_holds_array(context, evaluator, args) {
             return Err(ErrorKind::Unsupported);
         }
         if dynamic_kind == DynamicReferenceKind::Indirect {

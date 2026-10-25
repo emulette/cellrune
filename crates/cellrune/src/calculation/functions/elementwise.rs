@@ -34,23 +34,50 @@ pub(super) fn call(
     if lifted.is_empty() {
         return None;
     }
-    if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args) {
+    if let Some(kind) = direct_sheet_span_error(engine, context, descriptor, args)
+        .or_else(|| range_argument_error(engine, context, descriptor, args))
+    {
         return Some(Ok(ArrayEvaluation::scalar(ScalarEvaluation::new(
             Value::Error(kind),
         ))));
     }
+    // The other arguments are read once for every element, as Excel reads them: a random value
+    // is the same in each, and a computed argument is not recomputed.
+    let layout = descriptor.call_contract().layout();
+    let once = (0..args.len())
+        .filter(|index| !lifted.contains(index))
+        .filter_map(|index| {
+            let arg = &args[index];
+            match layout.mode_at(index, args.len()) {
+                Some(ArgumentMode::Scalar) if !is_plain_scalar(arg) => Some((index, Once::Value)),
+                Some(ArgumentMode::Array | ArgumentMode::Reference)
+                    if !is_reference(arg) && may_hold_array(engine, context, arg) =>
+                {
+                    Some((index, Once::Array))
+                }
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let lifting = Lifting {
+        lifted: &lifted,
+        once: &once,
+        only_several: false,
+    };
     Some(
         lift(
             engine,
             context,
             args,
             written,
-            &lifted,
+            &lifting,
             |context, args, written| {
                 evaluate_prepared(descriptor, engine, context, args, written).value
             },
         )
-        .map(ArrayEvaluation::new),
+        .map(|array| {
+            ArrayEvaluation::new(array.expect("lifting without `only_several` always answers"))
+        }),
     )
 }
 
@@ -69,19 +96,40 @@ pub(super) fn lifted_positions(
         .collect()
 }
 
-/// Evaluates the arguments at `lifted` as arrays and calls `call` once per element of their
-/// broadcast shape, with those arguments bound to the element's values and the others as written.
-/// `written` is substituted alike where it has the position.
+/// How an argument read once reaches every element's call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Once {
+    /// Its value, evaluated as the function reads a value.
+    Value,
+    /// Its array, evaluated as the function reads an array.
+    Array,
+}
+
+/// Which arguments an element-wise call reads per element and which once.
+pub(super) struct Lifting<'positions> {
+    /// The arguments read element by element.
+    pub(super) lifted: &'positions [usize],
+    /// The arguments evaluated once and bound for every element.
+    pub(super) once: &'positions [(usize, Once)],
+    /// Whether a call whose lifted arguments hold one value each answers `None`, for a function
+    /// that reads its arguments differently when none holds an array.
+    pub(super) only_several: bool,
+}
+
+/// Evaluates the lifted arguments as arrays and calls `call` once per element of their broadcast
+/// shape, with those arguments bound to the element's values, the arguments read once bound to
+/// their values, and the others as written. `written` is substituted alike where it has the
+/// position. A reference the call reads is charged to the formula's work once, not per element.
 pub(super) fn lift(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     args: &[Expr],
     written: &[Expr],
-    lifted: &[usize],
+    lifting: &Lifting<'_>,
     mut call: impl FnMut(EvalContext<'_>, &[Expr], &[Expr]) -> Value,
-) -> Result<Array, ErrorKind> {
-    let mut arrays = Vec::with_capacity(lifted.len());
-    for index in lifted {
+) -> Result<Option<Array>, ErrorKind> {
+    let mut arrays = Vec::with_capacity(lifting.lifted.len());
+    for index in lifting.lifted {
         arrays.push(match engine.eval_array(context, &args[*index]) {
             Ok(array) => array,
             Err(kind) if kind.is_engine_issue() => return Err(kind),
@@ -89,26 +137,40 @@ pub(super) fn lift(
             Err(kind) => Array::scalar(Value::Error(kind)),
         });
     }
-    let (rows, cols) = arrays.iter().try_fold((1, 1), |(rows, cols), array| {
-        broadcast_shape(
-            &Array {
-                rows,
-                cols,
-                data: Vec::new(),
-            },
-            array,
-        )
-    })?;
+    if lifting.only_several && arrays.iter().all(Array::is_scalar) {
+        return Ok(None);
+    }
+    let (rows, cols) = broadcast_all(arrays.iter())?;
     let cells = u64::from(rows) * u64::from(cols);
     let several = cells > 1;
     if several {
         engine.ensure_array_cells(cells)?;
         engine.charge_function_iterations(context, cells)?;
     }
-    let names = (0..lifted.len()).map(binding_name).collect::<Vec<_>>();
+    let mut fixed = Vec::with_capacity(lifting.once.len());
+    for (index, once) in lifting.once {
+        let value = match once {
+            Once::Value => {
+                ScopeValue::Scalar(engine.eval_scalar_evaluation(context, &args[*index]))
+            }
+            Once::Array => match engine.eval_array_evaluation(context, &args[*index]) {
+                Ok(evaluated) => ScopeValue::Array(std::sync::Arc::new(evaluated)),
+                Err(kind) if kind.is_engine_issue() => return Err(kind),
+                Err(kind) => ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind))),
+            },
+        };
+        fixed.push((*index, value));
+    }
+    let positions = lifting
+        .lifted
+        .iter()
+        .chain(fixed.iter().map(|(index, _)| index))
+        .copied()
+        .collect::<Vec<_>>();
+    let names = (0..positions.len()).map(binding_name).collect::<Vec<_>>();
     let substitute = |expressions: &[Expr]| {
         let mut substituted = expressions.to_vec();
-        for (name, index) in names.iter().zip(lifted) {
+        for (name, index) in names.iter().zip(&positions) {
             if let Some(expression) = substituted.get_mut(*index) {
                 *expression = Expr::Name(name.clone());
             }
@@ -120,22 +182,32 @@ pub(super) fn lift(
     let outer = context.bindings().len();
     let mut bindings = context.bindings().to_vec();
     bindings.extend(
-        names
+        names[..lifting.lifted.len()]
             .iter()
             .map(|name| ScopeEntry::new(name.clone(), ScopeValue::Missing)),
     );
+    bindings.extend(
+        names[lifting.lifted.len()..]
+            .iter()
+            .zip(fixed)
+            .map(|(name, (_, value))| ScopeEntry::new(name.clone(), value)),
+    );
+    let lifted_end = outer + lifting.lifted.len();
     let mut data = Vec::with_capacity(cells as usize);
     for row in 0..rows {
         for col in 0..cols {
-            for (entry, array) in bindings[outer..].iter_mut().zip(&arrays) {
+            for (entry, array) in bindings[outer..lifted_end].iter_mut().zip(&arrays) {
                 entry.set_value(ScopeValue::Scalar(ScalarEvaluation::new(
                     element_at(array, row, col).clone(),
                 )));
             }
+            let index = u64::from(row) * u64::from(cols) + u64::from(col);
             let mut element_context = context.with_bindings(&bindings);
             if several {
-                element_context =
-                    element_context.at_iteration(u64::from(row) * u64::from(cols) + u64::from(col));
+                element_context = element_context.at_iteration(index);
+            }
+            if index > 0 {
+                element_context = element_context.without_reference_work_charge();
             }
             let element_context = element_context.with_arguments(&element_args);
             let value = call(element_context, &element_args, &element_written);
@@ -145,6 +217,81 @@ pub(super) fn lift(
                 return Err(kind);
             }
             data.push(value);
+        }
+    }
+    Ok(Some(Array { rows, cols, data }))
+}
+
+/// The shape the arrays broadcast to together.
+fn broadcast_all<'array>(
+    mut arrays: impl Iterator<Item = &'array Array>,
+) -> Result<(u32, u32), ErrorKind> {
+    arrays.try_fold((1, 1), |(rows, cols), array| {
+        broadcast_shape(
+            &Array {
+                rows,
+                cols,
+                data: Vec::new(),
+            },
+            array,
+        )
+    })
+}
+
+/// What an element of a selection takes: the argument at a position, or a value of its own.
+pub(super) enum Pick {
+    Argument(usize),
+    Value(Value),
+}
+
+/// Evaluates a selection element by element, as `CHOOSE`, `IFS`, and `SWITCH` do over arrays:
+/// `pick` reads one element of each selector array and names the argument that element takes. The
+/// arguments some element takes are evaluated once as arrays and broadcast with the selectors, so
+/// `CHOOSE({1,2},B1:B3,A1:A3)` is three rows by two columns (Mac Excel 16.114).
+pub(super) fn select(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    selectors: &[Array],
+    mut pick: impl FnMut(&[&Value]) -> Pick,
+) -> Result<Array, ErrorKind> {
+    let (rows, cols) = broadcast_all(selectors.iter())?;
+    let picks_at = |row: u32, col: u32, pick: &mut dyn FnMut(&[&Value]) -> Pick| {
+        let elements = selectors
+            .iter()
+            .map(|selector| element_at(selector, row, col))
+            .collect::<Vec<_>>();
+        pick(&elements)
+    };
+    let mut taken = std::collections::BTreeMap::new();
+    for row in 0..rows {
+        for col in 0..cols {
+            if let Pick::Argument(position) = picks_at(row, col, &mut pick)
+                && !taken.contains_key(&position)
+            {
+                let array = match engine.eval_array(context, &args[position]) {
+                    Ok(array) => array,
+                    Err(kind) if kind.is_engine_issue() => return Err(kind),
+                    Err(kind) => Array::scalar(Value::Error(kind)),
+                };
+                taken.insert(position, array);
+            }
+        }
+    }
+    let (rows, cols) = broadcast_all(selectors.iter().chain(taken.values()))?;
+    let cells = u64::from(rows) * u64::from(cols);
+    engine.ensure_array_cells(cells)?;
+    let mut data = Vec::with_capacity(cells as usize);
+    for row in 0..rows {
+        for col in 0..cols {
+            data.push(match picks_at(row, col, &mut pick) {
+                Pick::Argument(position) => taken
+                    .get(&position)
+                    .map_or(Value::Error(ErrorKind::NA), |array| {
+                        element_at(array, row, col).clone()
+                    }),
+                Pick::Value(value) => value,
+            });
         }
     }
     Ok(Array { rows, cols, data })
@@ -166,31 +313,63 @@ fn value_arguments(
 /// function that is not called element by element would read as its first element. Such a call is
 /// unsupported until its array behavior is established; references and names keep the implicit
 /// intersection they always had.
-pub(super) fn value_argument_holds_array(descriptor: FunctionDescriptor, args: &[Expr]) -> bool {
-    value_arguments(descriptor, args).any(|index| holds_array_value(&args[index]))
+pub(super) fn value_argument_holds_array(
+    context: EvalContext<'_>,
+    descriptor: FunctionDescriptor,
+    args: &[Expr],
+) -> bool {
+    value_arguments(descriptor, args).any(|index| holds_array_value(context, &args[index]))
+}
+
+/// `#VALUE!` where a function that rejects ranges receives a range of several cells in a value
+/// argument; see `FunctionDescriptor::rejects_ranges`.
+pub(super) fn range_argument_error(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    descriptor: FunctionDescriptor,
+    args: &[Expr],
+) -> Option<ErrorKind> {
+    if !descriptor.rejects_ranges() {
+        return None;
+    }
+    value_arguments(descriptor, args)
+        .filter(|&index| may_hold_array(engine, context, &args[index]))
+        .any(|index| {
+            engine
+                .resolve_reference_value_expr(context, &args[index])
+                .is_ok_and(|reference| reference.cell_count() > 1)
+        })
+        .then_some(ErrorKind::Value)
 }
 
 /// Whether `expr` certainly evaluates to an array value: an array constant, a function returning
-/// an array, or an operator or element-wise call over one.
-fn holds_array_value(expr: &Expr) -> bool {
-    match expr {
+/// an array, a name bound to an array, or an operator or element-wise call over one.
+pub(super) fn holds_array_value(context: EvalContext<'_>, expr: &Expr) -> bool {
+    crate::calculation::stack::grow(|| match expr {
         Expr::Array(_) => true,
-        Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => holds_array_value(inner),
-        Expr::Binary { left, right, .. } => holds_array_value(left) || holds_array_value(right),
+        Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => {
+            holds_array_value(context, inner)
+        }
+        Expr::Binary { left, right, .. } => {
+            holds_array_value(context, left) || holds_array_value(context, right)
+        }
+        Expr::Name(name) => matches!(context.binding(name), Some(ScopeValue::Array(_))),
         Expr::Call { name, args } => {
             descriptor::resolve(name).is_some_and(|descriptor| match descriptor.array_evaluator() {
                 Some(evaluator) if evaluator.reads_value_arrays() => {
-                    args.iter().any(holds_array_value)
+                    args.iter().any(|arg| holds_array_value(context, arg))
                 }
                 _ => match descriptor.result_kind() {
                     FunctionResultKind::Array => true,
-                    FunctionResultKind::Scalar => value_argument_holds_array(descriptor, args),
+                    FunctionResultKind::Scalar => {
+                        value_argument_holds_array(context, descriptor, args)
+                    }
                     _ => false,
                 },
             })
         }
         _ => false,
-    }
+    })
 }
 
 /// A name no formula can bind, through which an element reaches the kernel.
@@ -200,8 +379,8 @@ fn binding_name(index: usize) -> String {
 
 /// Whether `expr` may evaluate to more than one value: literals, a single cell, and calls that
 /// return one value from values that cannot hold arrays never do.
-fn may_hold_array(engine: &Engine<'_>, context: EvalContext<'_>, expr: &Expr) -> bool {
-    match expr {
+pub(super) fn may_hold_array(engine: &Engine<'_>, context: EvalContext<'_>, expr: &Expr) -> bool {
+    crate::calculation::stack::grow(|| match expr {
         Expr::Number(_)
         | Expr::Text(_)
         | Expr::Logical(_)
@@ -248,6 +427,20 @@ fn may_hold_array(engine: &Engine<'_>, context: EvalContext<'_>, expr: &Expr) ->
                 .any(|index| may_hold_array(engine, context, &args[index]))
         }
         _ => true,
+    })
+}
+
+/// Whether `expr` is written as a reference.
+fn is_reference(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner) => is_reference(inner),
+        Expr::Ref(_)
+        | Expr::Range { .. }
+        | Expr::StructuredRef(_)
+        | Expr::SpillRef(_)
+        | Expr::ReferenceUnion { .. }
+        | Expr::ReferenceIntersection { .. } => true,
+        _ => false,
     }
 }
 

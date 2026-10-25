@@ -1,12 +1,12 @@
 use super::super::ast::Expr;
-use super::super::coerce::to_logical;
+use super::super::coerce::{to_logical, to_text};
 use super::super::eval::{Engine, EvalContext};
 use super::super::excel_digits::{Rounding, round_to_digits};
 use super::super::limits::CalculationLimitKind;
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::TextAdditionalFunction;
-use super::util::{fifteen_digit_rules, required_number, required_text};
+use super::util::{ArgumentCells, fifteen_digit_rules, required_number, required_text};
 
 pub(super) fn call(
     engine: &Engine<'_>,
@@ -256,8 +256,16 @@ fn text_boundary(
         Ok(text) => text,
         Err(kind) => return Value::Error(kind),
     };
-    let delimiter = match required_text(engine, context, &args[1]) {
-        Ok(text) => text,
+    // Several delimiters match whichever occurs first, a rule this kernel does not implement.
+    let delimiter = match ArgumentCells::read(engine, context, &args[1]) {
+        Ok(cells) if cells.len() == 1 => match cells
+            .get(engine, context, 0)
+            .and_then(|value| to_text(&value))
+        {
+            Ok(delimiter) => delimiter,
+            Err(kind) => return Value::Error(kind),
+        },
+        Ok(_) => return Value::Error(ErrorKind::Unsupported),
         Err(kind) => return Value::Error(kind),
     };
     let instance = match args.get(2) {

@@ -145,18 +145,49 @@ inventories, and measurements belong in the linked documentation rather than in 
   `INDEX` takes arrays of indexes (`INDEX(A1:C3,{1;3},{1,2})` is 2 by 2). A formula that is not an
   array formula still intersects a range, and now takes an array constant's first element where it
   reported `calculation.unsupported_expression` (`=LEN({"a","bb"})` is `1`). `TYPE` is `64` for an
-  array in an array context and for an array constant instead of the type of each element. A
-  function that returns an array or a reference of its own, such as `SEQUENCE`, `OFFSET`, and
-  `XLOOKUP`, is `calculation.unsupported_expression` when a value argument holds an array value.
+  array value of any size (`TYPE({1})`, `TYPE({1,2}*1)`) and for a range of several cells in an
+  array context, instead of the type of each element. `CHOOSE`, `IFS`, and `SWITCH` select element
+  by element (`CHOOSE({1,2},B1:B3,A1:A3)` is 3 by 2), and `IFERROR` and `IFNA` broadcast an array
+  value against their fallback (`IFERROR({1,2},{7;8})` is 2 by 2). A function that returns an
+  array or a reference of its own, such as `SEQUENCE` and `OFFSET`, is
+  `calculation.unsupported_expression` when a value argument holds an array value, including a
+  `LET` name bound to one, and so is an `INDEX` whose indexes hold arrays where a reference is
+  needed (`COUNTIF(INDEX(A1:A3,{1,2}),1)`).
   The function catalog's `returns_array` is now `true` only for functions with array results of
-  their own: `IFERROR` and `IFNA` are now marked, and `ABS`, `COUNTIF`, `COUNTIFS`, the `IS`
-  functions, `N`, `T`, `ERROR.TYPE`, and `TYPE` no longer are. Formulas that relied on a scalar
-  function reading one cell of a range inside `SUMPRODUCT` or an array formula now see every
-  cell; wrap the range in `@` (implicit intersection) to keep the old value.
+  their own: `IFERROR`, `IFNA`, `CHOOSE`, `IFS`, and `SWITCH` are now marked, and `ABS`, `COUNTIF`,
+  `COUNTIFS`, the `IS` functions, `N`, `T`, `ERROR.TYPE`, and `TYPE` no longer are. Formulas that
+  relied on a scalar function reading one cell of a range inside `SUMPRODUCT` or an array formula
+  now see every cell; wrap the range in `@` (implicit intersection) to keep the old value.
+- `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `ROWS`, and `COLUMNS` take array constants and
+  computed arrays where they took only references, as Excel does, instead of returning `#VALUE!`:
+  `INDEX({10,20,30},2)` is `20`, `ROWS({1;2;3})` is `3`, `MATCH(4,{1,4,9},0)` is `2`,
+  `INDEX(C1:C3,MATCH(1,(A1:A3="b")*(B1:B3=2),0))` finds the row meeting both conditions, and
+  `VLOOKUP(2,{1,"a";2,"b"},2,FALSE)` is `"b"`. An array of lookup values looks each one up in an
+  array context. `INDEX` of a reference of several rows and columns without a column is `#REF!`
+  instead of the first column's cell, and `MATCH` over a lookup array of several rows and columns is
+  `#N/A` instead of `calculation.unsupported_expression`. Give `INDEX` a column for a
+  two-dimensional reference.
+- `IF` and `CHOOSE` return the reference they select, as Excel does: `ISREF(IF(TRUE,A1))` is
+  `TRUE`, `ROWS(CHOOSE(2,A1:A2,A1:A5))` is `5`, and `SUM`, `COUNT`, `AND`, and the other aggregates
+  pass over text and logical values in it as in any reference, so `SUM(IF(TRUE,A1))` with A1
+  holding the text `5` is `0` instead of `5`. A condition or index that holds an array still
+  selects element by element. `AND` reads every element of an array argument, as `OR` and `XOR`
+  do: `AND({TRUE,FALSE})` is `FALSE` instead of `calculation.unsupported_expression`.
+- Functions from Excel's Analysis ToolPak — `EOMONTH`, `EDATE`, `WORKDAY`, `NETWORKDAYS`,
+  `WEEKNUM`, `YEARFRAC`, `QUOTIENT`, `MROUND`, `ISEVEN`, `ISODD`, `RANDBETWEEN`, the base
+  conversions, `CONVERT`, the Bessel and error functions, `COMPLEX`, `IMREAL`, `IMABS`,
+  `IMAGINARY`, `IMARGUMENT`, `DOLLARDE`, `DOLLARFR`, `EFFECT`, `FVSCHEDULE`, and the
+  fixed-income functions, among others — return `#VALUE!` for a range of several cells in a value
+  argument in every formula, as Excel does, instead of intersecting it: `=EOMONTH(A1:A3,0)` is
+  `#VALUE!`. A computed array is still taken element by element (`=EOMONTH(A1:A3+0,0)`), so add
+  `+0` or use `@` to keep the old reading.
+- `TEXTJOIN` uses a delimiter holding several values in turn, as Excel documents:
+  `TEXTJOIN({"-","+"},TRUE,"a","b","c","d")` is `"a-b+c-d"` instead of one result per delimiter.
+  `TEXTBEFORE` and `TEXTAFTER` with several delimiters are `calculation.unsupported_expression`.
 - The `excel_near_zero` interop value of `arithmetic_semantics`, and
-  `ArithmeticSemantics::ExcelNearZero`, keep their names while selecting all of the fifteen-digit rules above: near-zero correction,
-  comparison, and rounding. The interop schema versions are unchanged because no key or value
-  changes form.
+  `ArithmeticSemantics::ExcelNearZero`, keep their names while selecting all of the fifteen-digit
+  rules above: near-zero correction, comparison, and rounding. The interop schema versions are
+  unchanged because no key or value changes form.
 
 ### Fixed
 

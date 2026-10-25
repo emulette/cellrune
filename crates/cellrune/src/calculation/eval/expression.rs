@@ -8,10 +8,10 @@ use crate::calculation::coerce::to_number;
 use crate::calculation::excel_digits::cancel_near_zero;
 use crate::calculation::functions::{
     BuiltinCallable, CallableShadow, DynamicFunction, Evaluator, FunctionResultKind,
-    call_function_array, call_function_evaluation, callable_call_scope, direct_builtin_callable,
-    function_call_shape_is_valid, function_evaluator, function_result_kind, intrinsic_scope_value,
-    invoke_scope_value, is_reference_returning_function, lambda_scope_value, let_scope_value,
-    reduce_scope_value,
+    call_function_array, call_function_evaluation, call_returns_reference, callable_call_scope,
+    direct_builtin_callable, function_call_shape_is_valid, function_evaluator,
+    function_result_kind, intrinsic_scope_value, invoke_scope_value, lambda_scope_value,
+    let_scope_value, reduce_scope_value,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::numeric_text::NumericText;
@@ -147,7 +147,7 @@ impl Engine<'_> {
                     Some(Evaluator::Dynamic(DynamicFunction::Reduce)) => {
                         reduce_scope_value(self, context, args).unwrap_or_else(scope_error)
                     }
-                    _ if is_reference_returning_function(name) => self
+                    _ if call_returns_reference(context, name, args) => self
                         .resolve_reference_value_expr(context, expr)
                         .map_or_else(scope_error, ScopeValue::Reference),
                     _ => self
@@ -348,12 +348,12 @@ impl Engine<'_> {
             | Expr::Range { .. } => self
                 .resolve_reference_value_expr(context, expr)
                 .map(ScopeValue::Reference),
-            Expr::Call { name, .. }
+            Expr::Call { name, args }
                 if context.binding(name).is_none()
                     && self
                         .resolve_name_expr_with_id_in_context(context, name)
                         .is_none()
-                    && is_reference_returning_function(name) =>
+                    && call_returns_reference(context, name, args) =>
             {
                 self.resolve_reference_value_expr(context, expr)
                     .map(ScopeValue::Reference)
@@ -392,7 +392,7 @@ impl Engine<'_> {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     return self.scalar_from_scope(context, &scoped).value;
                 }
-                if is_reference_returning_function(name) {
+                if call_returns_reference(context, name, args) {
                     return self
                         .resolve_rect_expr(context, expr)
                         .and_then(|rect| self.implicit_intersection_rect(context, rect))
@@ -481,7 +481,7 @@ impl Engine<'_> {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     return self.scalar_from_scope(context, &scoped);
                 }
-                if is_reference_returning_function(name) {
+                if call_returns_reference(context, name, args) {
                     self.eval_reference_scalar(context, expr)
                 } else {
                     call_function_evaluation(self, context, name, args)
@@ -539,7 +539,7 @@ impl Engine<'_> {
                 if let Some(scoped) = callable_call_scope(self, context, name, args) {
                     return self.scalar_from_scope(context, &scoped);
                 }
-                if is_reference_returning_function(name) {
+                if call_returns_reference(context, name, args) {
                     self.eval_reference_scalar(context, operand)
                 } else {
                     self.first_array_value(context, operand)
@@ -1029,12 +1029,12 @@ impl Engine<'_> {
                     names,
                 )
             }
-            Expr::Call { name, .. }
+            Expr::Call { name, args }
                 if context.binding(name).is_none()
                     && self
                         .resolve_name_expr_with_id_in_context(context, name)
                         .is_none()
-                    && is_reference_returning_function(name) =>
+                    && call_returns_reference(context, name, args) =>
             {
                 self.resolve_reference_value_expr(context, expr)
                     .ok()

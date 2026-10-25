@@ -45,10 +45,13 @@ pub(super) fn call(
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    // An array constant is an array even where its first element stands for it elsewhere (Mac
-    // Excel 16.114 `TYPE({1,2})` in a formula that is not an array formula is 64).
-    if function == InformationFunction::Type && is_array_constant(&args[0]) {
-        return Value::Number(ARRAY_TYPE);
+    // An array value is an array even where its first element stands for it elsewhere (Mac
+    // Excel 16.114 `TYPE({1,2})` and `TYPE({1,2}*1)` in a formula that is not an array formula
+    // are 64).
+    if function == InformationFunction::Type
+        && super::elementwise::holds_array_value(context, &args[0])
+    {
+        return argument_type(engine, context, &args[0]).unwrap_or_else(Value::Error);
     }
     let value = if function == InformationFunction::T {
         match engine.resolve_rect_expr(context, &args[0]) {
@@ -66,8 +69,8 @@ pub(super) fn call(
     apply(function, value, engine.numeric_text())
 }
 
-/// `TYPE` where its argument may be an array: an array or a range of several cells is 64, as Mac
-/// Excel 16.114 returns for `=TYPE(A1:A3)` and `=TYPE({1,2})`.
+/// `TYPE` where its argument may be an array: an array value of any size, or a range of several
+/// cells, is 64, as Mac Excel 16.114 returns for `=TYPE(A1:A3)`, `=TYPE({1})` and `=TYPE({1,2}*1)`.
 pub(super) fn type_array(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
@@ -76,29 +79,43 @@ pub(super) fn type_array(
     let [argument] = args else {
         return Err(ErrorKind::Value);
     };
+    argument_type(engine, context, argument).map(Array::scalar)
+}
+
+fn argument_type(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    argument: &Expr,
+) -> Result<Value, ErrorKind> {
+    // A reference's shape decides, whatever part of a whole column is populated.
+    if engine
+        .resolve_reference_value_expr(context, argument)
+        .is_ok_and(|reference| reference.cell_count() > 1)
+    {
+        return Ok(Value::Number(ARRAY_TYPE));
+    }
     let array = match engine.eval_array(context, argument) {
         Ok(array) => array,
         Err(kind) if kind.is_engine_issue() => return Err(kind),
         Err(kind) => Array::scalar(Value::Error(kind)),
     };
-    let value = if array.is_scalar() {
-        value_type(array.data.into_iter().next().unwrap_or(Value::Blank))
-    } else {
-        Value::Number(ARRAY_TYPE)
-    };
-    Ok(Array::scalar(value))
+    if let Some(kind) = array.data.iter().find_map(|value| match value {
+        Value::Error(kind) if kind.is_engine_issue() => Some(*kind),
+        _ => None,
+    }) {
+        return Err(kind);
+    }
+    Ok(
+        if array.is_scalar() && !super::elementwise::holds_array_value(context, argument) {
+            value_type(array.data.into_iter().next().unwrap_or(Value::Blank))
+        } else {
+            Value::Number(ARRAY_TYPE)
+        },
+    )
 }
 
 /// The `TYPE` of an array.
 const ARRAY_TYPE: f64 = 64.0;
-
-fn is_array_constant(expr: &Expr) -> bool {
-    match expr {
-        Expr::Array(_) => true,
-        Expr::Paren(inner) => is_array_constant(inner),
-        _ => false,
-    }
-}
 
 fn apply(function: InformationFunction, value: Value, numeric_text: NumericText) -> Value {
     if matches!(value, Value::Error(kind) if kind.is_engine_issue()) {
