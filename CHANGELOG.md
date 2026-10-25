@@ -16,85 +16,116 @@ inventories, and measurements belong in the linked documentation rather than in 
   `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms, `ISO.CEILING`, and
   `PERCENTRANK` read the scaled quotient to fifteen significant digits before rounding, as Excel
   does: `ROUND(1.005,2)` is `1.01`, `ROUNDDOWN(1.15,2)` is `1.15`, and `ROUNDUP(0.1+0.2,1)` is
-  `0.3` where they were `1`, `1.14`, and `0.4`. A place past the fifteenth significant digit leaves
-  the value unchanged, so `ROUND(1,400)` is `1` and `ROUND(1E307,2)` is `1E307` instead of
-  `#NUM!`, and a negative digit count past the range of a double rounds to `0`, or `#NUM!` for
-  `ROUNDUP`, in either mode. Select `ArithmeticSemantics::Ieee754` to round the binary quotient
-  as before.
+  `0.3` where they were `1`, `1.14`, and `0.4`. A quotient that ties past its fifteenth digit
+  reads toward zero, as in Excel, so `ROUND(1234567890123470+5,-1)` is `1234567890123470`. A
+  place past the fifteenth significant digit leaves the value unchanged, so `ROUND(1,400)` is `1`,
+  `ROUND(1E307,2)` is `1E307` instead of `#NUM!`, and `ROUND(1.23456789012345E+20,-2)` keeps every
+  bit; a negative digit count past the range of a double rounds to `0`, or `#NUM!` for `ROUNDUP`,
+  in either mode. Select `ArithmeticSemantics::Ieee754` to round the binary quotient as before.
 - Under the default `ArithmeticSemantics::ExcelNearZero`, the comparison operators, `SWITCH`, and
   the criteria of `COUNTIF(S)`, `SUMIF(S)`, `AVERAGEIF(S)`, `MAXIFS`, `MINIFS`, and the database
-  functions treat numbers that differ only past their fifteenth significant digit as equal, as
-  Excel does: `=0.1+0.2=0.3` and `=1.1-1=0.1` are `TRUE`, and `COUNTIF` counts a cell holding
-  `0.1+0.2` as `0.3`. Lookups, sorting, `UNIQUE`, `GROUPBY`, and `MODE` keep exact equality.
-  Select `ArithmeticSemantics::Ieee754` to compare exactly as before.
+  functions treat numbers as equal when they round to the same fifteen significant digits, as
+  Excel does: `=0.1+0.2=0.3`, `=1.1-1=0.1`, and `=1=1+4E-15` are `TRUE` while `=1+4E-15=1+6E-15`
+  is `FALSE`, and `COUNTIF` counts a cell holding `0.1+0.2` as `0.3`. Ordering compares the same
+  roundings, so `=0.1+0.2>0.3` is `FALSE` and `=0.1+0.2>=0.3` is `TRUE`. Lookups, sorting,
+  `UNIQUE`, `GROUPBY`, and `MODE` keep exact equality. Select `ArithmeticSemantics::Ieee754` to
+  compare exactly as before.
 - Under the default `ArithmeticSemantics::ExcelNearZero`, the near-zero correction follows what
   Excel does instead of an exact decimal trace. It applies to the addition or subtraction a formula
   or defined name ends with, unparenthesized, and to the final addition of the `SUM`, `AVERAGE`,
   `AVERAGEA`, `SUBTOTAL`, and `AGGREGATE` totals, and it zeroes a result below eight units in the
-  last place of the larger operand. So `=(0.1+0.2-0.3)`, `=(0.1+0.2-0.3)*1`, `=0.1+0.2-0.3=0`
+  last place of the larger operand, reading text operands as the operator does
+  (`=0.1+0.2-"0.3"` is `0`). So `=(0.1+0.2-0.3)`, `=(0.1+0.2-0.3)*1`, `=0.1+0.2-0.3=0`
   (now `FALSE`), `LET` bodies, `SUMIF(S)`, `AVERAGEIF(S)`, the database functions, `SUMPRODUCT`,
   and `NPV` keep the residue they used to correct; `=A1+A2-A3` over formula cells, `=1+7*2^-52-1`,
   and `=1E+15+0.3-1E+15` are now `0`; and `=SUM(0.1,0.2,-0.3,0)` keeps its residue. Select
   `ArithmeticSemantics::Ieee754` to keep every residue.
 - A number joined to text (`&`, `CONCAT`, `TEXTJOIN`, `LEN`, and other text arguments) is rounded
-  to fifteen significant digits and written in scientific notation when its plain decimal would
-  take more than twenty characters besides the sign, as Excel does: `2/3&""` is
-  `0.666666666666667` instead of `0.666666666666666`, and `1E+20&""` is `1E+20` instead of
-  twenty-one digits. `TEXT(1E+20,"General")` is now `1E+20` instead of unsupported.
+  to fifteen significant digits, a tie toward zero, and written in scientific notation when its
+  plain decimal would take more than twenty characters besides the sign, as Excel does: `2/3&""`
+  is `0.666666666666667` instead of `0.666666666666666`, `(1234567890123450+5)&""` is
+  `1234567890123450`, and `1E+20&""` is `1E+20` instead of twenty-one digits.
+  `TEXT(1E+20,"General")` is now `1E+20` instead of unsupported. Either `ArithmeticSemantics`
+  writes numbers this way; text that compared the old digits needs the new ones.
 - A number written in a formula keeps fifteen significant digits, as Excel reads it:
   `1234567890123456` is `1234567890123450` and `=0.30000000000000004=0.3` is `TRUE`. Formulas
-  that spell more digits calculate with the shortened number.
+  that spell more digits calculate with the shortened number, under either
+  `ArithmeticSemantics`.
 - Text where a formula needs a number reads as Excel reads a typed entry, in the arithmetic
   operators, function arguments, `VALUE`, the direct arguments of `SUM`, `COUNT`, and the
   statistics, criteria, and holidays: with thousands separators (`"1,000"+1` is `1001`), a percent
-  sign before or after the number (`"50%"*2` is `1`), parentheses for a negative number, the
+  sign before or after the number or inside the parentheses (`"50%"*2` is `1`, `"(5%)"*1` is
+  `-0.05`), parentheses for a negative number, spaces after a sign, percent sign, currency symbol,
+  or opening parenthesis (`"- 5"*1` is `-5`), the
   locale's currency symbol, a whole number and a fraction (`"1 1/2"`), as a date (`2024-01-15`, and
   `1/15/2024` under `Locale::EnUs`), and as a time (`12:30`, `2:30 PM`). So `YEAR("2024-01-15")` is
   `2024` and `SUMIF(A1:A3,">=2024-01-10",B1:B3)` compares dates. Only spaces around the text are
   ignored, not tabs or other whitespace, and digits past the fifteenth significant one read as
-  zeros. Text Excel reads from the current date, such as `"1/2"`, stays `#VALUE!`. `VALUE` and
-  `FIXED` read only the locale's currency symbol, so under the default `Locale::EnUs`
-  `VALUE("₩5")` is `#VALUE!` where it was `5`, and `€`, `£`, and `¥` no longer read. Either
-  `ArithmeticSemantics` reads text this way.
+  zeros, in the whole part of `"1234567890123456 1/2"` too. Text Excel reads from the current
+  date or with a month name, such as `"1/2"` and `"Jan 2"`, stays `#VALUE!`, and a criterion with
+  such text compares it as text: `COUNTIF(A1:A3,">=1/2")` counts no date cell, where Excel counts
+  the dates from January 2 of the current year. `VALUE` and `FIXED` read only the locale's currency
+  symbol, so under the default `Locale::EnUs` `VALUE("₩5")` is `#VALUE!` where it was `5`, and
+  `€`, `£`, and `¥` no longer read. Either `ArithmeticSemantics` reads text this way; text that
+  must stay text in arithmetic now needs an explicit check such as `ISNUMBER(VALUE(x))`.
 - `DATEVALUE` and `TIMEVALUE` read those dates and times and a date followed by a time, returning
   the serial's whole day and its fraction: `DATEVALUE("2024/02/29")` is `45351` and
   `TIMEVALUE("24:00")` is `0` instead of `#VALUE!`, and fractional seconds are read to the
   millisecond. A date outside the workbook's date system is `#VALUE!` instead of `#NUM!`, and tabs
-  around the text are no longer ignored.
+  around the text are no longer ignored. Formulas that tested for `#NUM!` from these functions
+  need to test for `#VALUE!`.
 - A number criterion of `COUNTIF(S)`, `SUMIF(S)`, `AVERAGEIF(S)`, `MAXIFS`, `MINIFS`, and the
   database functions compares by order only with number cells, and `<>` counts a text cell as
   unequal even when its text reads as the number, as Excel does: `">4"` no longer counts the text
-  `5`, and `"<>5"` counts it. An equality still matches it.
+  `5`, and `"<>5"` counts it. An equality still matches it. Store numbers as numbers to compare
+  them by order.
 - `MATCH` with match type 0 matches a number only with number cells, as `VLOOKUP` and `HLOOKUP`
-  already did: `MATCH(5,{"5";5},0)` is `2` instead of `1`.
-- `AND`, `OR`, and `XOR` skip a text argument other than `TRUE` and `FALSE`, typed or computed,
-  as Excel does: `AND("0",1)` and `AND("x",1)` are `TRUE` where they were `FALSE` and `#VALUE!`.
+  already did: with A1 holding the text `5` and A2 the number 5, `MATCH(5,A1:A2,0)` is `2` instead
+  of `1`. Look up text with a text value.
+- `AND`, `OR`, and `XOR` skip text other than `TRUE` and `FALSE` in a direct argument, typed or
+  computed, and every text in a referenced cell, as Excel does: `AND("0",1)` and `AND("x",1)` are
+  `TRUE` where they were `FALSE` and `#VALUE!`, and with A1 holding the text `x`, `AND(A1,TRUE)`,
+  `OR(A1,FALSE)`, and `XOR(A1,TRUE)` return a logical value instead of `#VALUE!`. With no number
+  or logical value left they stay `#VALUE!`.
 - `^` and `POWER` return `#DIV/0!` instead of `#NUM!` for zero raised to a negative power, and
   give the odd root of a negative base whose fractional exponent has an odd whole reciprocal, read
-  to fifteen significant digits: `(-8)^(1/3)` is `-1.9999999999999998` instead of `#NUM!`, while
+  to fifteen significant digits: `(-8)^(1/3)` is `-(8^(1/3))`, `-2`, instead of `#NUM!`, while
   `(-8)^(2/3)` stays `#NUM!`. `LOG` with base 1 is `#DIV/0!` instead of `#NUM!`. Either
-  `ArithmeticSemantics` computes powers this way.
+  `ArithmeticSemantics` computes powers this way; formulas that relied on `#NUM!` for a negative
+  base need an explicit sign test.
+- `FILTERXML` reports a node whose text reads as a number by the rules above, such as
+  `2024-01-15` or `1,000`, as `calculation.unsupported_expression` instead of returning the text.
 - Under the default `ArithmeticSemantics::ExcelNearZero`, `TEXT`, `FIXED`, `DOLLAR`, and the
   display text of a cell round the number's fifteen-significant-digit decimal, as Excel does:
   `TEXT(1.005,"0.00")` and `FIXED(1.005,2)` are `1.01` and `TEXT(0.285,"0%")` is `29%` where they
   were `1.00` and `28%`. Numbers of 2^53 or more rounded units show their fifteen significant
   digits followed by zeros (`TEXT(2^60,"0")` is `1152921504606850000`) instead of `#NUM!` or
-  unsupported, and a result longer than 255 characters or a code with more than 127 decimal
-  placeholders is `#VALUE!`. Select `ArithmeticSemantics::Ieee754` to round the binary value as
-  before; the display text always rounds as Excel shows it.
+  unsupported, and a tie past the fifteenth digit rounds toward zero (`TEXT(1234567890123455,"0")`
+  is `1234567890123450`). A result longer than 255 UTF-16 code units, a positive `DOLLAR` result
+  of 255, and a code with more than 127 decimal placeholders in any section are `#VALUE!`. Select
+  `ArithmeticSemantics::Ieee754` to round the binary value, now from its exact decimal expansion,
+  so that every digit shows (`TEXT(2^60,"0")` is `1152921504606846976`); the display text always
+  rounds as Excel shows it.
 - `TEXT` formats every code as Excel does; the one-section digit codes 0.1.26 formatted no longer
   keep that release's rules. `TEXT(0,"#")` is empty instead of `0`, `TEXT(1,"0.#")` is `1.`
   instead of `1`, and a negative number that rounds to zero shows no sign (`TEXT(-0.4,"0")` is
-  `0` instead of `-0`, in display text too). `TEXT(1234.5,"0n")` and digits beside date, era, or
-  weekday codes in any section (`TEXT(5,"0;0 d")`, `"0 g"`, `"0 aaa"`) are `#VALUE!`; `TEXT(2.5,"0/2")`
+  `0` instead of `-0`, in display text too). `TEXT(1234.5,"0n")`, runs such as `"0 nn"`, and
+  digits beside date, era, or weekday codes in any section (`TEXT(5,"0;0 d")`, `"0 g"`,
+  `"0 aaa"`) are `#VALUE!`; `TEXT(2.5,"0/2")`
   and `A/P` beside digits are unsupported instead of `3/2` and `5 a/p`. Letters of other scripts
   and runs of letters that are not codes beside digits show as written in every code, so
-  `TEXT(5,"#,##0원;-#,##0원")` is `5원` instead of unsupported.
+  `TEXT(5,"#,##0원;-#,##0원")` is `5원` instead of unsupported. Formulas that relied on the
+  0.1.26 results need the Excel ones.
 - `TEXT` formats text that does not read as a number, and logical values, with the code's text
   section, as Excel does: `TEXT("abc","0.00")` is `abc` and `TEXT(TRUE,"0")` is `TRUE` instead of
   `#VALUE!` and `1`. `@` in a section other than the last, `General`, and a fourth section with
   digits or a condition are `#VALUE!` for them. Conditions in the number sections no longer make
-  the display text of a text cell unsupported, and a last section holding `@` formats it.
+  the display text of a text cell unsupported, and a last section holding `@` formats it. Wrap the
+  value in `VALUE` to keep the old `#VALUE!` for text.
+- The `excel_near_zero` interop value of `arithmetic_semantics`, and `ArithmeticSemantics::ExcelNearZero`,
+  keep their names while selecting all of the fifteen-digit rules above: near-zero correction,
+  comparison, and rounding. The interop schema versions are unchanged because no key or value
+  changes form.
 
 ### Fixed
 
@@ -113,7 +144,7 @@ inventories, and measurements belong in the linked documentation rather than in 
   changed.
 - The 0.1.27 entry below states the catalog as 497 official names and 498 accepted entries.
 - `docs/NUMERICS.md` no longer claims that Excel returns `FALSE` for `=(1.1-1)=0.1`; Excel
-  returns `TRUE` and CellRune returns `FALSE`.
+  returns `TRUE`, as CellRune now does under the default (see Changed).
 
 ## [0.1.27] - 2026-10-24
 

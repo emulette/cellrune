@@ -180,7 +180,8 @@ pub(crate) struct CapabilityArgs {
     pub(crate) today_serial: Option<f64>,
     /// Optional finite Excel serial returned by `NOW()`.
     pub(crate) now_serial: Option<f64>,
-    /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
+    /// Fifteen-digit arithmetic policy: near-zero correction, comparison, and rounding; omitted
+    /// selects Excel's rules.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
     /// Financial convergence policy; omitted selects Microsoft's function-specific budgets.
@@ -253,11 +254,12 @@ pub(crate) struct RecalculateArgs {
     /// Optional seed, 0 through 4294967295, that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`
     /// draw from; the same seed repeats every draw.
     pub(crate) random_seed: Option<u32>,
-    /// Optional locale conventions: `{"locale": "ko-KR"}` writes `DOLLAR` in won, counts Hangul as two
-    /// bytes, and labels `GROUPBY` totals `합계`; `display_language` sets the labels apart. Omitted
-    /// selects en-US.
+    /// Optional locale conventions: `{"locale": "ko-KR"}` writes `DOLLAR` in won, reads `₩5` but not
+    /// `$5` or `1/15/2024` as a number, counts Hangul as two bytes, and labels `GROUPBY` totals
+    /// `합계`; `display_language` sets the labels apart. Omitted selects en-US.
     pub(crate) locale_profile: Option<LocaleProfileDto>,
-    /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
+    /// Fifteen-digit arithmetic policy: near-zero correction, comparison, and rounding; omitted
+    /// selects Excel's rules.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
     /// Financial convergence policy; omitted selects Microsoft's function-specific budgets.
@@ -296,7 +298,7 @@ pub(crate) struct TargetCalculationOptionsArgs {
     pub(crate) random_seed: Option<u32>,
     /// Locale conventions; omitted selects en-US.
     pub(crate) locale_profile: Option<LocaleProfileDto>,
-    /// Policy for cancelling addition and subtraction.
+    /// Whether Excel's fifteen-digit rules apply: near-zero correction, comparison, and rounding.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
     /// Policy for `IRR`, `XIRR`, and `RATE` convergence.
@@ -340,11 +342,12 @@ pub(crate) struct PreviewChangesArgs {
     /// Optional seed, 0 through 4294967295, that `RAND()`, `RANDBETWEEN()`, and `RANDARRAY()`
     /// draw from; the same seed repeats every draw.
     pub(crate) random_seed: Option<u32>,
-    /// Optional locale conventions: `{"locale": "ko-KR"}` writes `DOLLAR` in won, counts Hangul as two
-    /// bytes, and labels `GROUPBY` totals `합계`; `display_language` sets the labels apart. Omitted
-    /// selects en-US.
+    /// Optional locale conventions: `{"locale": "ko-KR"}` writes `DOLLAR` in won, reads `₩5` but not
+    /// `$5` or `1/15/2024` as a number, counts Hangul as two bytes, and labels `GROUPBY` totals
+    /// `합계`; `display_language` sets the labels apart. Omitted selects en-US.
     pub(crate) locale_profile: Option<LocaleProfileDto>,
-    /// Cancelling arithmetic policy; omitted selects Excel-compatible near-zero correction.
+    /// Fifteen-digit arithmetic policy: near-zero correction, comparison, and rounding; omitted
+    /// selects Excel's rules.
     #[serde(default)]
     pub(crate) arithmetic_semantics: ArithmeticSemanticsDto,
     /// Financial convergence policy; omitted selects Microsoft's function-specific budgets.

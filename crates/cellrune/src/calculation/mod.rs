@@ -475,24 +475,25 @@ impl FunctionUsageReport {
 /// Whether calculation follows Excel's fifteen-significant-digit number rules or the IEEE-754
 /// values as they are.
 ///
-/// Excel corrects some addition and subtraction residues to exactly zero, compares numbers that
-/// differ only past their fifteenth significant digit as equal (`=0.1+0.2=0.3` is `TRUE`), and
-/// reads a scaled quotient to fifteen digits before it rounds (`ROUND(1.005,2)` is `1.01`).
-/// IEEE-754 keeps every residue, compares exactly, and rounds the binary value.
+/// Excel corrects some addition and subtraction residues to exactly zero, compares numbers by
+/// their fifteen-significant-digit roundings (`=0.1+0.2=0.3` is `TRUE`), and reads a number to
+/// fifteen digits before it rounds (`ROUND(1.005,2)` and `TEXT(1.005,"0.00")` give `1.01`).
+/// IEEE-754 keeps every residue, compares exactly, and rounds the binary value. Reading numbers
+/// from text and literals and writing them as text follow Excel in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum ArithmeticSemantics {
     /// Apply Excel's near-zero correction to the addition or subtraction a formula ends with and
-    /// to the totals of `SUM`, `AVERAGE`, `SUBTOTAL`, and `AGGREGATE`, its fifteen-digit
-    /// comparison in the comparison operators, `SWITCH`, and `COUNTIF`-style and
+    /// to the totals of `SUM`, `AVERAGE`, `AVERAGEA`, `SUBTOTAL`, and `AGGREGATE`, its
+    /// fifteen-digit comparison in the comparison operators, `SWITCH`, and `COUNTIF`-style and
     /// database criteria, and its fifteen-digit rounding in `ROUND`, `ROUNDUP`, `ROUNDDOWN`,
     /// `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and `.PRECISE` forms, `ISO.CEILING`,
-    /// and `PERCENTRANK`.
+    /// `PERCENTRANK`, `TEXT`, `FIXED`, and `DOLLAR`.
     #[default]
     ExcelNearZero,
-    /// Use the IEEE-754 values unchanged: no correction, exact comparison, and rounding of the
-    /// binary value, as releases up to 0.1.2 did and as releases up to 0.1.27 did for comparison
-    /// and rounding.
+    /// Use the IEEE-754 values unchanged in those places: no correction, exact comparison, and
+    /// rounding of the binary value, as releases up to 0.1.2 did for the correction and releases
+    /// up to 0.1.27 did for comparison and rounding.
     Ieee754,
 }
 
@@ -567,8 +568,9 @@ impl CalculationOptions {
         self.random_seed
     }
 
-    /// Selects the locale conventions of `DOLLAR`, the names `TEXT` shows, the double-byte text
-    /// functions, and the `GROUPBY` and `PIVOTBY` total labels. The default is English (United
+    /// Selects the locale conventions of `DOLLAR`, the names `TEXT` shows, the currency symbol and
+    /// date order text reads as a number with, the double-byte text functions, and the `GROUPBY`
+    /// and `PIVOTBY` total labels. The default is English (United
     /// States); CellRune never reads the host locale.
     pub const fn with_locale_profile(mut self, locale_profile: LocaleProfile) -> Self {
         self.locale_profile = locale_profile;
@@ -591,13 +593,14 @@ impl CalculationOptions {
         self.limits
     }
 
-    /// Selects how a cancelling sum or difference is treated.
+    /// Selects whether Excel's fifteen-digit rules apply: near-zero correction, comparison, and
+    /// rounding.
     pub const fn with_arithmetic_semantics(mut self, arithmetic: ArithmeticSemantics) -> Self {
         self.arithmetic = arithmetic;
         self
     }
 
-    /// Returns the configured near-zero arithmetic policy.
+    /// Returns the configured fifteen-digit arithmetic policy.
     pub const fn arithmetic_semantics(self) -> ArithmeticSemantics {
         self.arithmetic
     }

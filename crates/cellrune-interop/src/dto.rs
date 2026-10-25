@@ -8,7 +8,7 @@ pub enum ArithmeticSemanticsDto {
     #[default]
     #[serde(rename = "excel_near_zero")]
     ExcelNearZero,
-    /// Preserve the raw IEEE-754 result used through CellRune 0.1.2.
+    /// Use the binary values unchanged for correction, comparison, and rounding.
     #[serde(rename = "ieee_754")]
     Ieee754,
 }
@@ -50,8 +50,9 @@ impl LocaleDto {
     }
 }
 
-/// Locale conventions: the regional format of `DOLLAR`, `TEXT` names, and the double-byte text
-/// functions, and the language of the `GROUPBY` and `PIVOTBY` total labels.
+/// Locale conventions: the regional format of `DOLLAR`, `TEXT` names, reading text as a number,
+/// and the double-byte text functions, and the language of the `GROUPBY` and `PIVOTBY` total
+/// labels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LocaleProfileDto {
@@ -111,7 +112,7 @@ pub struct CalculationOptionsDto {
     /// Locale conventions; omitted selects English (United States).
     #[serde(default)]
     pub locale_profile: Option<LocaleProfileDto>,
-    /// Policy for cancelling addition and subtraction.
+    /// Whether Excel's fifteen-digit rules apply: near-zero correction, comparison, and rounding.
     #[serde(default)]
     pub arithmetic_semantics: ArithmeticSemanticsDto,
     /// Policy for `IRR`, `XIRR`, and `RATE` convergence.
@@ -885,7 +886,7 @@ pub struct CalculationOptionsReportDto {
     /// default `en-US` profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locale_profile: Option<LocaleProfileDto>,
-    /// Policy for cancelling addition and subtraction.
+    /// Whether Excel's fifteen-digit rules apply: near-zero correction, comparison, and rounding.
     pub arithmetic_semantics: ArithmeticSemanticsDto,
     /// Policy for iterative financial-solver convergence.
     pub financial_solver_semantics: FinancialSolverSemanticsDto,

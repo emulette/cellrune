@@ -66,16 +66,18 @@
 //! tolerance rather than for equality.
 //!
 //! Two behaviors are selectable through [`CalculationOptions`], and both default to matching
-//! Excel rather than to what releases up to 0.1.2 did:
+//! Excel:
 //!
 //! - [`ArithmeticSemantics`] decides whether Excel's fifteen-digit rules apply: its near-zero
 //!   correction of a formula's final addition or subtraction, its fifteen-digit comparison, and
-//!   its fifteen-digit rounding; or every IEEE-754 value is used as it is.
+//!   its fifteen-digit rounding in the rounding functions and number formats; or the binary values
+//!   are used unchanged in those places. How numbers are read from and written to text, and the
+//!   other function semantics, are the same in both.
 //! - [`FinancialSolverSemantics`] decides whether `IRR`, `XIRR`, and `RATE` stop at the iteration
 //!   budget Microsoft documents, or search longer and return values where Excel reports `#NUM!`.
 //!
-//! Select [`ArithmeticSemantics::Ieee754`] and [`FinancialSolverSemantics::ExtendedSearch`] to
-//! restore the 0.1.2 behavior.
+//! [`ArithmeticSemantics::Ieee754`] and [`FinancialSolverSemantics::ExtendedSearch`] select what
+//! releases up to 0.1.2 did in those two places.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]

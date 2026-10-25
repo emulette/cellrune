@@ -85,21 +85,24 @@ fn dollar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], written:
         Ok(rounded) => rounded,
         Err(kind) => return Value::Error(kind),
     };
-    let format = format!(
+    // A positive amount leaves room for the closing parenthesis, as Excel's two-section currency
+    // format does: `DOLLAR(1E+190,0)` is `#VALUE!` at 255 characters while `DOLLAR(-1E+188,0)`
+    // shows 254 (Mac Excel 16.114).
+    let amount = format!(
         "\"{}\"#,##0{}",
         locale.currency_symbol(),
         decimal_places(decimals)
     );
-    let formatted = match format_number(rounded.abs(), &format, engine.format_context()) {
-        Ok(formatted) => formatted,
-        Err(kind) => return Value::Error(kind),
-    };
-    let output = if rounded.is_sign_negative() && rounded != 0.0 {
-        format!("({formatted})")
-    } else {
-        formatted
-    };
-    engine.bounded_text(output)
+    let format = format!("{amount}_);({amount})");
+    match format_number(rounded, &format, engine.format_context()) {
+        Ok(mut formatted) => {
+            if formatted.ends_with(' ') {
+                formatted.pop();
+            }
+            engine.bounded_text(formatted)
+        }
+        Err(kind) => Value::Error(kind),
+    }
 }
 
 fn fixed(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

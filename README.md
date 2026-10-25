@@ -118,11 +118,12 @@ Volatile functions require deterministic inputs through `CalculationOptions`:
 call's position in its formula, so wherever full calculation produces a value the other
 calculation modes produce the same one; the generator is not cryptographically secure. Use
 `with_locale_profile` to select the built-in English (United States) or Korean (Korea)
-conventions that `DOLLAR`, the names `TEXT` shows, the double-byte text functions, and the
-`GROUPBY` and `PIVOTBY` total labels follow; CellRune never reads the host locale. Use
-`with_arithmetic_semantics` and `with_financial_solver_semantics` to opt into the raw IEEE-754 and
-extended-search behavior shipped through 0.1.2; the defaults select Excel-compatible cancellation
-and Microsoft's function-specific solver budgets. Use
+conventions that `DOLLAR`, the names `TEXT` shows, the currency symbol and date order text reads
+as a number with, the double-byte text functions, and the `GROUPBY` and `PIVOTBY` total labels
+follow; CellRune never reads the host locale. Use `with_arithmetic_semantics` to use binary values
+unchanged for near-zero correction, comparison, and rounding instead of Excel's fifteen-digit
+rules, and `with_financial_solver_semantics` to opt into the extended search shipped through
+0.1.2; the defaults select Excel's rules and Microsoft's function-specific solver budgets. Use
 `supported_function_catalog` for the build's exact function surface and `scan_function_usage` to
 summarize the functions used by a workbook. `scan_formula_capabilities` remains available as an
 optional static inventory for migration planning and user-interface reporting; calculation does
@@ -448,7 +449,7 @@ with Workbook.create() as workbook:
     workbook.set_number("Sheet1", "A1", 41.0)
     workbook.set_formula("Sheet1", "B1", "=A1+1")
     workbook.calculate()
-    # 0.1.2-compatible calculation remains available when required:
+    # Binary arithmetic and the extended solver search remain available when required:
     workbook.calculate(
         arithmetic_semantics="ieee_754",
         financial_solver_semantics="extended_search",
@@ -700,7 +701,8 @@ The following are outside the current scope:
 [`docs/NUMERICS.md`](https://github.com/emulette/cellrune/blob/main/docs/NUMERICS.md)
 records where calculated values differ from Excel and why, and documents the two calculation
 options added in 0.1.3: `ArithmeticSemantics` and `FinancialSolverSemantics`, which default to
-Excel's behavior and can be set to `Ieee754` and `ExtendedSearch` for what 0.1.2 did.
+Excel's behavior and can be set to `Ieee754`, which uses binary values unchanged for near-zero
+correction, comparison, and rounding, and `ExtendedSearch`, which searches as 0.1.2 did.
 
 ## Verification
 

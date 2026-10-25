@@ -84,7 +84,8 @@ pub(super) fn round_quotient(quotient: f64, rounding: Rounding, decimal: bool) -
 /// Rounds `value` at `digits` decimal places, or at `10^-digits` when `digits` is negative.
 ///
 /// With `decimal`, a place past the fifteenth significant digit leaves the value as it is, as
-/// Excel returns `ROUND(1, 400)` and `ROUND(1E307, 2)` unchanged. Without it only a place past the
+/// Excel returns `ROUND(1, 400)`, `ROUND(1E307, 2)`, and `ROUND(1.23456789012345E+20, -2)`
+/// unchanged. Without it only a place past the
 /// range of a double does. Returns `None` when the rounded value is not a finite double.
 pub(super) fn round_to_digits(
     value: f64,
@@ -110,7 +111,11 @@ pub(super) fn round_to_digits(
             _ => Some(0.0),
         };
     }
-    let rounded = round_quotient(value / scale, rounding, decimal) * scale;
+    let quotient = value / scale;
+    if decimal && quotient.abs() >= FIFTEEN_DIGIT_QUOTIENT {
+        return Some(value);
+    }
+    let rounded = round_quotient(quotient, rounding, decimal) * scale;
     rounded.is_finite().then_some(rounded)
 }
 
@@ -135,13 +140,10 @@ pub(super) fn cancel_near_zero(left: f64, right: f64, result: f64) -> f64 {
 /// `2^-49`: eight units in the last place of a number in `[1, 2)`.
 const TWO_POW_MINUS_49: f64 = 1.0 / 562_949_953_421_312.0;
 
-/// Whether two numbers differ only past their fifteenth significant digit.
-///
-/// The rule is LibreOffice's `rtl::math::approxEqual` without its exception for whole numbers,
-/// which Excel does not make (`=POWER(10,15)+1=POWER(10,15)` is `TRUE`): numbers of different
-/// signs and a zero compare exactly; otherwise the difference must be below the larger of `2^-48`
-/// of the smaller magnitude and half a unit in its fifteenth digit. Equality under this rule is not
-/// transitive, so it never orders values for sorting or searching.
+/// Whether two numbers are equal once each is rounded to fifteen significant digits, as Excel
+/// compares them: `=1=1+4E-15` and `=0.1+0.2=0.3` are `TRUE` while `=1+4E-15=1+6E-15` and
+/// `=5=5+5E-15` are `FALSE` (Mac Excel 16.114). Numbers of different signs and a zero compare
+/// exactly.
 pub(super) fn approximately_equal(left: f64, right: f64) -> bool {
     if left == right {
         return true;
@@ -149,13 +151,13 @@ pub(super) fn approximately_equal(left: f64, right: f64) -> bool {
     if left == 0.0 || right == 0.0 || left.is_sign_negative() != right.is_sign_negative() {
         return false;
     }
-    let difference = (left - right).abs();
-    if !difference.is_finite() {
+    // Numbers equal to fifteen digits differ by less than a unit in their fifteenth digit, at
+    // most `1e-14` of the larger magnitude.
+    let larger = left.abs().max(right.abs());
+    if (left - right).abs() >= larger * 1e-14 {
         return false;
     }
-    let smaller = left.abs().min(right.abs());
-    let fifteenth_digit = 10_f64.powi(smaller.log10().floor() as i32) * 5e-15;
-    difference < (smaller * TWO_POW_MINUS_48).max(fifteenth_digit)
+    fifteen_significant_digits(left) == fifteen_significant_digits(right)
 }
 
 /// Orders two numbers as the comparison operators do: `Equal` when they are approximately equal,
@@ -167,9 +169,6 @@ pub(super) fn approximate_ordering(left: f64, right: f64) -> Ordering {
         left.partial_cmp(&right).unwrap_or(Ordering::Equal)
     }
 }
-
-/// `2^-48`, the relative difference LibreOffice allows between two approximately equal numbers.
-const TWO_POW_MINUS_48: f64 = 1.0 / 281_474_976_710_656.0;
 
 /// The longest plain decimal, sign excluded, a number converts to before it is written in
 /// scientific notation: `1E+19` converts to twenty digits and `1E+20` to `1E+20`, `1.2345E-14` to
@@ -187,10 +186,7 @@ pub(crate) fn general_text(value: f64) -> String {
     if !value.is_finite() {
         return format!("{value}");
     }
-    let mut text = DecimalText::default();
-    if write!(text, "{:.14e}", value.abs()).is_err() {
-        return format!("{value}");
-    }
+    let text = fifteen_digit_text(value.abs());
     let (mantissa, exponent) = text
         .as_str()
         .split_once('e')
@@ -266,23 +262,65 @@ pub(crate) fn fifteen_digit_literal(literal: &str) -> Cow<'_, str> {
 /// The significant digits Excel keeps of a number.
 const EXCEL_SIGNIFICANT_DIGITS: usize = 15;
 
+/// Writes a finite `value` in scientific notation with fifteen significant digits, rounded to
+/// the nearest and a tie toward zero, as Excel rounds: `(1234567890123450+5)&""` is
+/// `1234567890123450` and `ROUND(1234567890123470+5,-1)` is `1234567890123470` (Mac Excel
+/// 16.114). Rust rounds a tie to even, which moves it away from zero only to an even fifteenth
+/// digit, so such a result is checked against the exact value.
+fn fifteen_digit_text(value: f64) -> DecimalText {
+    let mut text = DecimalText::default();
+    write!(text, "{value:.14e}").expect("a finite double fits the buffer");
+    let last = text
+        .as_str()
+        .find('e')
+        .expect("scientific formatting writes an exponent")
+        - 1;
+    if (text.bytes[last] - b'0') % 2 == 1 {
+        return text;
+    }
+    let mut sixteen = DecimalText::default();
+    write!(sixteen, "{value:.15e}").expect("a finite double fits the buffer");
+    let exponent_start = sixteen
+        .as_str()
+        .find('e')
+        .expect("scientific formatting writes an exponent");
+    if sixteen.bytes[exponent_start - 1] != b'5' {
+        return text;
+    }
+    // The tie is exact only when no digit past the sixteenth is nonzero; a double has at most 767
+    // significant digits.
+    let exact = format!("{value:.766e}");
+    let (digits, _) = exact
+        .split_once('e')
+        .expect("scientific formatting writes an exponent");
+    // `d.` and the fifteen digits after the point come first.
+    if digits
+        .trim_start_matches('-')
+        .bytes()
+        .skip(17)
+        .any(|digit| digit != b'0')
+    {
+        return text;
+    }
+    let mut toward_zero = DecimalText::default();
+    let (mantissa, exponent) = sixteen.as_str().split_at(exponent_start);
+    write!(toward_zero, "{}{exponent}", &mantissa[..mantissa.len() - 1])
+        .expect("the digits fit the buffer");
+    toward_zero
+}
+
 /// Returns the double nearest to `value` written with fifteen significant digits.
 pub(super) fn fifteen_significant_digits(value: f64) -> f64 {
     if value == 0.0 || !value.is_finite() {
         return value;
     }
-    let mut text = DecimalText::default();
-    if write!(text, "{value:.14e}").is_err() {
-        return value;
-    }
-    text.as_str().parse().unwrap_or(value)
+    fifteen_digit_text(value).as_str().parse().unwrap_or(value)
 }
 
 /// The fifteen significant digits of a nonzero finite magnitude, as ASCII, and the power of ten
 /// the first one stands at.
 pub(super) fn fifteen_significant_decimal(magnitude: f64) -> ([u8; 15], i32) {
-    let mut text = DecimalText::default();
-    write!(text, "{magnitude:.14e}").expect("a finite double fits the buffer");
+    let text = fifteen_digit_text(magnitude);
     let (mantissa, exponent) = text
         .as_str()
         .split_once('e')
@@ -311,6 +349,32 @@ mod tests {
             fifteen_significant_digits(123_456_789_012.345_67),
             123_456_789_012.346
         );
+    }
+
+    #[test]
+    fn fifteen_digits_round_an_exact_tie_toward_zero() {
+        assert_eq!(
+            fifteen_significant_digits(1_234_567_890_123_455.0),
+            1_234_567_890_123_450.0
+        );
+        assert_eq!(
+            fifteen_significant_digits(-1_234_567_890_123_455.0),
+            -1_234_567_890_123_450.0
+        );
+        assert_eq!(
+            fifteen_significant_digits(123_456_789_012_347.5),
+            123_456_789_012_347.0
+        );
+        assert_eq!(
+            fifteen_significant_digits(1_234_567_890_123_456.0),
+            1_234_567_890_123_460.0
+        );
+        assert_eq!(
+            fifteen_significant_digits(2_f64.powi(60)),
+            1_152_921_504_606_850_000.0
+        );
+        assert_eq!(general_text(1_234_567_890_123_475.0), "1234567890123470");
+        assert_eq!(general_text(123_456_789_012_344.5), "123456789012344");
     }
 
     #[test]
@@ -387,6 +451,15 @@ mod tests {
         assert!(!approximately_equal(1e-300, -1e-300));
         assert!(approximately_equal(1e15 + 1.0, 1e15));
         assert!(!approximately_equal(1e14 + 1.0, 1e14));
+        // Mac Excel 16.114 compares the fifteen-digit roundings.
+        assert!(approximately_equal(1.0, 1.0 + 4e-15));
+        assert!(!approximately_equal(1.0 + 4e-15, 1.0 + 6e-15));
+        assert!(!approximately_equal(9.0, 9.0 + 3e-14));
+        assert!(!approximately_equal(5.0, 5.0 + 5e-15));
+        assert!(approximately_equal(2.0, 2.0 + 5e-15));
+        assert!(!approximately_equal(0.3, 0.3 + 6e-16));
+        assert!(approximately_equal(1e15, 1e15 + 4.0));
+        assert!(!approximately_equal(1e15, 1e15 + 6.0));
         assert_eq!(approximate_ordering(0.1 + 0.2, 0.3), Ordering::Equal);
         assert_eq!(approximate_ordering(0.3, 0.31), Ordering::Less);
     }

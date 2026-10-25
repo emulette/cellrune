@@ -98,8 +98,9 @@ fn evaluate_arithmetic(op: BinaryOp, left: f64, right: f64) -> Value {
 /// Raises `base` to `exponent` as `^` and `POWER` do. `0^0` is `#NUM!` and zero to a negative
 /// power is `#DIV/0!`. A negative base takes a fractional exponent only when its reciprocal, read to
 /// fifteen significant digits, is an odd whole number, and then yields the odd root it stands for:
-/// `(-8)^(1/3)` is `-(8^(1/3))`, `-1.9999999999999998`, while `(-8)^(2/3)` is `#NUM!` (Mac Excel
-/// 16.114). The result may be infinite, which the callers report as `#NUM!`.
+/// `(-8)^(1/3)` is `-(8^(1/3))` while `(-8)^(2/3)` is `#NUM!` (Mac Excel 16.114, whose own power
+/// is one unit below the correctly rounded `2` there). The result may be infinite, which the
+/// callers report as `#NUM!`.
 pub(super) fn power(base: f64, exponent: f64) -> Result<f64, ErrorKind> {
     if base == 0.0 && exponent == 0.0 {
         return Err(ErrorKind::Num);

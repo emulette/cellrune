@@ -105,9 +105,12 @@ impl NumericText {
     }
 }
 
-/// A number with its sign, currency symbol, percent sign, and parentheses.
+/// A number with its sign, currency symbol, percent sign, and parentheses, as Mac Excel 16.114
+/// reads them: spaces may follow each of them and precede a trailing percent sign or a closing
+/// parenthesis (`- 5`, `% 5`, `( 5 )`, `₩ -5`), and the percent sign may stand inside the
+/// parentheses (`(5%)`).
 fn signed_number(text: &str, currency: &str) -> Option<f64> {
-    let (mut rest, percent_after) = match text.strip_suffix('%') {
+    let (mut rest, mut percent) = match text.strip_suffix('%') {
         Some(rest) => (rest.trim_end_matches(' '), true),
         None => (text, false),
     };
@@ -119,7 +122,7 @@ fn signed_number(text: &str, currency: &str) -> Option<f64> {
     loop {
         if !has_currency && let Some(after) = rest.strip_prefix(currency) {
             has_currency = true;
-            rest = after.trim_start_matches(' ');
+            rest = after;
         } else if !signed
             && !parenthesized
             && let Some(after) = rest.strip_prefix(['+', '-'])
@@ -127,10 +130,8 @@ fn signed_number(text: &str, currency: &str) -> Option<f64> {
             signed = true;
             negative = rest.starts_with('-');
             rest = after;
-        } else if !percent_before
-            && !percent_after
-            && let Some(after) = rest.strip_prefix('%')
-        {
+        } else if !percent && let Some(after) = rest.strip_prefix('%') {
+            percent = true;
             percent_before = true;
             rest = after;
         } else if !signed
@@ -140,12 +141,16 @@ fn signed_number(text: &str, currency: &str) -> Option<f64> {
         {
             // `(5)`, `(₩5)`, and `₩(5)` read; a parenthesis after a sign or a percent sign does not.
             parenthesized = true;
-            rest = after.strip_suffix(')')?.trim_matches(' ');
+            rest = after.strip_suffix(')')?.trim_end_matches(' ');
+            if !percent && let Some(inner) = rest.strip_suffix('%') {
+                percent = true;
+                rest = inner.trim_end_matches(' ');
+            }
         } else {
             break;
         }
+        rest = rest.trim_start_matches(' ');
     }
-    let percent = percent_before || percent_after;
     if has_currency && percent {
         return None;
     }
@@ -173,7 +178,10 @@ fn mixed_number(whole: &str, fraction: &str, percent: bool) -> Option<f64> {
     if denominator == 0.0 {
         return None;
     }
-    let mut value = whole.parse::<f64>().ok()? + numerator.parse::<f64>().ok()? / denominator;
+    // The whole part keeps fifteen significant digits, as a literal does:
+    // `VALUE("1234567890123456 1/2")` is `1234567890123450.5`.
+    let whole = fifteen_digit_literal(&whole).parse::<f64>().ok()?;
+    let mut value = whole + numerator.parse::<f64>().ok()? / denominator;
     if percent {
         value /= 100.0;
     }
@@ -385,6 +393,21 @@ mod tests {
             ("1 3/2", 2.5),
             ("1,000 1/2", 1_000.5),
             ("(1 1/2)", -1.5),
+            ("(1 1/2%)", -0.015),
+            ("(5%)", -0.05),
+            ("( 5% )", -0.05),
+            ("(% 5)", -0.05),
+            ("(1,000%)", -10.0),
+            ("- 5", -5.0),
+            ("+ 5", 5.0),
+            ("% 5", 0.05),
+            ("% -5", -0.05),
+            ("- 5%", -0.05),
+            ("$ -5", -5.0),
+            ("- $5", -5.0),
+            ("$( 5)", -5.0),
+            ("- 1 1/2", -1.5),
+            ("1234567890123456 1/2", 1_234_567_890_123_450.5),
             ("1 1/2%", 0.015),
             ("$1 1/2", 1.5),
             ("1234567890123456", 1_234_567_890_123_450.0),
@@ -406,7 +429,8 @@ mod tests {
             "1,2", "12,34", "1,23,456", ",123", "0,001", "1e3,000", "1, 234", "1.5,000", "inf",
             "nan", "Infinity", "1e400", "5e-400", "1E+308", "0x10", "1_000", "５", "TRUE", "1.2.3",
             "\u{a0}5", "5\u{a0}", "\t5", "5\n", "1 1/0", "1  1/2", "1 1.5/2", "1 1/2.5", "1e2 1/2",
-            "1.5 1/2", "1 -1/2", "1/2", "5-3", "€5", "₩5",
+            "1.5 1/2", "1 -1/2", "1/2", "5-3", "€5", "₩5", "(5%%)", "-(5%)", "(-5%)", "$5 %",
+            "$(5%)", "5 -",
         ] {
             assert_eq!(US.number(text), None, "{text:?}");
         }

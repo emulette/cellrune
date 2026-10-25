@@ -106,7 +106,9 @@ calculate differently on two machines and break the determinism the rest of the 
 Instead `CalculationOptions::with_locale_profile` selects one of the built-in locales, English
 (United States) by default or Korean (Korea). The profile decides the `DOLLAR` currency symbol, the
 month, weekday, and `AM`/`PM` names `TEXT`
-shows, and the `GROUPBY` and `PIVOTBY` total labels (`Total` or `합계`). The labels follow a separate
+shows, the currency symbol and date order text reads as a number with (`$5` and `1/15/2024` under
+English, `₩5` and only year-first dates under Korean), and the `GROUPBY` and `PIVOTBY` total labels
+(`Total` or `합계`). The labels follow a separate
 display language, because an Excel with an English interface and Korean regional settings may
 label totals in English. The Korean names and the label of a grand total over several levels have
 not been measured, so they remain unsupported.
@@ -131,7 +133,8 @@ correction is the default.
 Every value in the default column is what Excel 16.0 build 20326 returns. Excel corrects only:
 
 - the addition or subtraction a formula ends with, unparenthesized, element by element when it
-  spills (`={0.1,1}+0.2-0.3` spills `0` and `0.9`). A defined name's formula is a formula of its
+  spills (`={0.1,1}+0.2-0.3` spills `0` and `0.8999999999999999`). Text operands are read as the
+  operator reads them first, so `=0.1+0.2-"0.3"` is `0` (Mac Excel 16.114). A defined name's formula is a formula of its
   own, so a name defined as `=0.1+0.2-0.3` is `0` wherever it is used. A parenthesized root, a
   further operation, an `IF` branch, and a `LET` or `LAMBDA` body keep the residue, so
   `=0.1+0.2-0.3=0` is `FALSE`;
@@ -148,7 +151,8 @@ result only. Microsoft describes the correction in its
 [floating-point accuracy note](https://learn.microsoft.com/en-us/troubleshoot/microsoft-365-apps/excel/floating-point-arithmetic-inaccurate-result)
 without publishing the boundary; the boundary above is measured.
 
-Releases 0.1.0 through 0.1.2 behaved as `Ieee754` does. It remains available:
+Releases 0.1.0 through 0.1.2 corrected no residue, as `Ieee754` does; under `Ieee754` the
+comparison and rounding rules below also use the binary values. It remains available:
 
 ```rust
 use cellrune::{ArithmeticSemantics, CalculationOptions};
@@ -167,23 +171,22 @@ because it renders fifteen significant digits, and so do comparisons and roundin
 default:
 
 - The comparison operators, `SWITCH`, and the criteria of `COUNTIF`, `SUMIF(S)`, `AVERAGEIF(S)`,
-  `MAXIFS`, `MINIFS`, and the database functions treat two numbers as equal when they differ only
-  past their fifteenth significant digit, so `=(1.1-1)=0.1` and `=0.1+0.2=0.3` are `TRUE` as in
-  Excel (the committed oracle cases `curated:arithmetic:c004` and `c015`). The rule is
-  LibreOffice's `rtl::math::approxEqual` without its exception for whole numbers, which Excel does
-  not make (`=POWER(10,15)+1=POWER(10,15)` is `TRUE`): numbers of different signs and a zero
-  compare exactly; otherwise the difference must be below the larger of `2^-48` of the smaller
-  magnitude and half a unit in its fifteenth digit. `<=` is
-  "less or equal", `<>` is "not equal", so `=0.1+0.2>0.3` is `FALSE`. Comparing with zero stays
-  exact; only the correction of a formula's root or an aggregate's total makes a residue zero.
+  `MAXIFS`, `MINIFS`, and the database functions compare two numbers by their roundings to
+  fifteen significant digits, so `=(1.1-1)=0.1` and `=0.1+0.2=0.3` are `TRUE` as in Excel (the
+  committed oracle cases `curated:arithmetic:c004` and `c015`), `=1=1+4E-15` and
+  `=POWER(10,15)+1=POWER(10,15)` are `TRUE`, and `=1+4E-15=1+6E-15` and `=5=5+5E-15` are `FALSE`
+  (Mac Excel 16.114). Numbers of different signs and a zero compare exactly. `<=` is "less or
+  equal", `<>` is "not equal", so `=0.1+0.2>0.3` is `FALSE`. Comparing with zero stays exact; only
+  the correction of a formula's root or an aggregate's total makes a residue zero.
 - Sorting, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `LOOKUP`, `UNIQUE`, `GROUPBY`, and `MODE`
-  keep exact order and equality, because equality to fifteen digits is not transitive.
+  keep exact order and equality.
 - `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `MROUND`, `CEILING`, `FLOOR`, their `.MATH` and
   `.PRECISE` forms, `ISO.CEILING`, and `PERCENTRANK` read the scaled quotient to fifteen
-  significant digits before rounding it, so `ROUND(1.005,2)` is `1.01` and `ROUNDDOWN(1.15,2)`
+  significant digits, a tie toward zero, before rounding it, so `ROUND(1.005,2)` is `1.01` and `ROUNDDOWN(1.15,2)`
   is `1.15`. The product is not snapped again: `FLOOR(0.3,0.1)` is three units of `0.1`,
   `0.30000000000000004`, which Excel also returns. A place past the fifteenth significant digit
-  leaves the value unchanged (`ROUND(1,400)` is `1`).
+  leaves the value unchanged (`ROUND(1,400)` is `1`, and `ROUND(1.23456789012345E+20,-2)` keeps
+  every bit).
 - `TEXT`, `FIXED`, and `DOLLAR` round the number's fifteen-significant-digit decimal, scaled
   exactly by `%` and thousands commas, and show digits past the fifteenth as zeros:
   `TEXT(1.005,"0.00")` and `FIXED(1.005,2)` are `1.01`, `TEXT(0.285,"0%")` is `29%`, and
@@ -191,7 +194,8 @@ default:
   the same way, since it has no calculation options.
 
 Under `Ieee754` comparison is exact and rounding uses the binary quotient, so `ROUND(1.005,2)` is
-`1`, `TEXT(1.005,"0.00")` is `1.00`, and `TEXT(2^60,"0")` is `1152921504606846976`.
+`1`, `TEXT(1.005,"0.00")` is `1.00`, and `TEXT(2^60,"0")` is `1152921504606846976`, the exact
+decimal of the binary value.
 
 ### Matching: numbers in formulas and numbers joined to text
 
@@ -202,7 +206,8 @@ as rather than how it is calculated.
   zeros, as Excel reads it: `1234567890123456` is `1234567890123450` and `0.30000000000000004`
   is `0.3`.
 - A number joined to text (`&`, `CONCAT`, `LEN`, and the other text arguments) is rounded to
-  fifteen significant digits. It is written as a plain decimal when that takes at most twenty
+  fifteen significant digits, a tie toward zero (`(1234567890123450+5)&""` is `1234567890123450`,
+  Mac Excel 16.114). It is written as a plain decimal when that takes at most twenty
   characters besides the sign and in scientific notation otherwise, with a signed exponent of at
   least two digits: `2/3&""` is `0.666666666666667`, `1E+19&""` is `10000000000000000000`,
   `1E+20&""` is `1E+20`, `1.5E-17&""` is `0.000000000000000015`, and `PI()*1E-5&""` is
@@ -456,8 +461,8 @@ The current engine audit of the frozen 0.1.8 workbooks records:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Apache POI formula fixture | 1,295 | 1,290 | 5 | 0 | 0 | 0 |
 | Apache POI matrix fixture | 266 | 250 | 16 | 0 | 0 | 0 |
-| CellRune formula oracle — Excel Online | 1,496 | 1,485 | 4 | 7 | 0 | 0 |
-| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,460 | 6 | 7 | 23 | 0 |
+| CellRune formula oracle — Excel Online | 1,496 | 1,487 | 2 | 7 | 0 | 0 |
+| CellRune formula oracle — Mac Excel 2021 | 1,496 | 1,462 | 4 | 7 | 23 | 0 |
 
 `match` uses each case's reviewed comparator: finite numbers default to a scale-relative `1e-8`,
 while cancellation and signed-zero probes use exact bits. `divergent` records and enforces both

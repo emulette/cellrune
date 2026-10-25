@@ -699,9 +699,10 @@ export interface CalculationOptions {
    */
   readonly randomSeed?: number;
   /**
-   * Locale conventions: `{ locale: "ko-KR" }` writes `DOLLAR` in won, counts Hangul as two bytes in
-   * `LENB` and the other byte functions, and labels `GROUPBY` and `PIVOTBY` totals `합계`;
-   * `displayLanguage` sets the labels apart. Omitted selects en-US.
+   * Locale conventions: `{ locale: "ko-KR" }` writes `DOLLAR` in won, reads `₩5` but not `$5` or
+   * `1/15/2024` as a number, counts Hangul as two bytes in `LENB` and the other byte functions,
+   * and labels `GROUPBY` and `PIVOTBY` totals `합계`; `displayLanguage` sets the labels apart.
+   * Omitted selects en-US.
    */
   readonly localeProfile?: LocaleProfile;
   readonly arithmeticSemantics?: "excel_near_zero" | "ieee_754";

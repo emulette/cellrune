@@ -35,9 +35,23 @@ pub(crate) struct FormatContext {
     pub(crate) decimal: bool,
 }
 
-/// The most characters Excel formats a number to: `TEXT(1E+254,"0")` shows 255 digits and
-/// `TEXT(1E+255,"0")` is `#VALUE!` (Mac Excel 16.114).
-const MAX_FORMATTED_CHARACTERS: usize = 255;
+/// The most UTF-16 code units a formatted result holds: `TEXT(1E+254,"0")` shows 255 digits,
+/// `TEXT(1E+255,"0")` and `TEXT(-1E+254,"0")` are `#VALUE!`, and `TEXT(REPT("😀",127),"@")` holds
+/// 254 units while 128 emoji are `#VALUE!` (Mac Excel 16.114).
+const MAX_FORMATTED_UNITS: usize = 255;
+
+/// The most decimal placeholders a section holds: `TEXT(1,"0."&REPT("0",128))` is `#VALUE!` in
+/// any section and in scientific notation (Mac Excel 16.114).
+const MAX_DECIMALS: usize = 127;
+
+/// Rejects a result longer than Excel formats.
+fn within_limit(text: String) -> Result<String, ErrorKind> {
+    if text.encode_utf16().count() > MAX_FORMATTED_UNITS {
+        Err(ErrorKind::Value)
+    } else {
+        Ok(text)
+    }
+}
 
 /// Formats a number with `format`, as `TEXT` does.
 pub(crate) fn format_number(
@@ -56,10 +70,7 @@ pub(crate) fn format_number(
             kind
         }
     })?;
-    if text.chars().count() > MAX_FORMATTED_CHARACTERS {
-        return Err(ErrorKind::Value);
-    }
-    Ok(text)
+    within_limit(text)
 }
 
 /// Formats text with `format`, as Mac Excel 16.114 formats text and logical values in `TEXT`: the
@@ -105,19 +116,23 @@ pub(crate) fn format_text(
             _ => output.push_str(&literal_text(token)?),
         }
     }
-    Ok(output)
+    within_limit(output)
 }
 
 /// Rejects a code Mac Excel 16.114 answers with `#VALUE!` whichever section formats the value:
-/// a letter it reads as no code (`TEXT(5,"0;0n")`), or digit placeholders beside date, time, era,
-/// or weekday codes (`TEXT(5,"0;0 d")`, `TEXT("abc","0 g")`, `TEXT(0.5,"ss.##")`).
+/// a letter it reads as no code (`TEXT(5,"0;0n")`, `TEXT(1,"nn")`), more than 127 decimal
+/// placeholders, or digit placeholders beside date, time, era, or weekday codes
+/// (`TEXT(5,"0;0 d")`, `TEXT("abc","0 g")`, `TEXT(0.5,"ss.##")`).
 fn check_code(sections: &[RawSection]) -> Result<(), ErrorKind> {
     let mut unsupported = false;
     for section in sections {
         let digits = shows_digits(&section.tokens);
+        if decimal_places(&section.tokens) > MAX_DECIMALS {
+            return Err(ErrorKind::Value);
+        }
         for token in &section.tokens {
             let checked = match token {
-                Token::Invalid(_) => Err(ErrorKind::Value),
+                Token::Invalid(_) | Token::Letters { letter: 'n', .. } => Err(ErrorKind::Value),
                 Token::Elapsed { .. } if digits => Err(ErrorKind::Value),
                 Token::Letters { letter, count, .. } if digits => {
                     number::letters_beside_digits(*letter, *count)
@@ -136,6 +151,16 @@ fn check_code(sections: &[RawSection]) -> Result<(), ErrorKind> {
     } else {
         Ok(())
     }
+}
+
+/// The digit placeholders between a section's first decimal point and its exponent.
+fn decimal_places(tokens: &[Token]) -> usize {
+    tokens
+        .iter()
+        .skip_while(|token| **token != Token::DecimalPoint)
+        .take_while(|token| !matches!(token, Token::Exponent { .. }))
+        .filter(|token| matches!(token, Token::Placeholder(_)))
+        .count()
 }
 
 /// Whether a section shows digits: a digit placeholder other than the `0`s of `ss.00`.

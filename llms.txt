@@ -1411,7 +1411,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   other scripts are also shown as written (`TEXT(5,"#,##0원")` is `5원`);
   date, time, era, and weekday codes beside digits make the whole code
   `#VALUE!` in whichever section they stand, as `n` does (`TEXT(5,"0;0 d")`,
-  `TEXT(5,"0 g")`, `TEXT(5,"0 aaa")`, `TEXT(0.5,"ss.##")`), and accented Latin
+  `TEXT(5,"0 g")`, `TEXT(5,"0 aaa")`, `TEXT(0.5,"ss.##")`), as do runs of `n`
+  (`TEXT(1,"0 nn")`), and accented Latin
   letters there, which Excel shows or rejects by letter, are
   `calculation.unsupported_expression`. Elsewhere runs such as `aaa` and the
   era and Buddhist-year codes `g` and `b` are
@@ -1426,16 +1427,20 @@ than guessing a name from a different XLSX crate (`calamine`,
   its `?` placeholders and the slash (`TEXT(1.999,"# ?/?")` is `2    `), and a
   negative number keeps its sign before an empty whole part
   (`TEXT(-0.25,"# ?/?")` is `- 1/4`). Decimal and scientific layouts round
-  half away from zero the number's fifteen-significant-digit decimal, with
-  digits past the fifteenth shown as zeros (`TEXT(1.005,"0.00")` is `1.01`,
+  half away from zero the number's fifteen-significant-digit decimal, itself
+  rounded with a tie toward zero, with digits past the fifteenth shown as
+  zeros (`TEXT(1.005,"0.00")` is `1.01`, `TEXT(1234567890123455,"0")` is
+  `1234567890123450`,
   `TEXT(0.285,"0%")` is `29%`, `TEXT(2^60,"0")` is `1152921504606850000`);
-  under `ArithmeticSemantics::Ieee754` they round the scaled double
+  under `ArithmeticSemantics::Ieee754` they round the exact decimal of the double
   (`1.00`, `28%`, `1152921504606846976`). As Excel shows them, the decimal
   point is always shown (`TEXT(1,"0.#")` is `1.`), a zero integer part
   without a `0` placeholder shows nothing (`TEXT(0,"#")` is empty), and a
   negative number shows its minus sign only when a nonzero digit shows
-  (`TEXT(-0.001,"0.00")` is `0.00`). A result longer than 255 characters and
-  more than 127 decimal placeholders are `#VALUE!` (`TEXT(1E+255,"0")`); a
+  (`TEXT(-0.001,"0.00")` is `0.00`). A result longer than 255 UTF-16 code
+  units, for text as well as numbers, and more than 127 decimal placeholders
+  in any section, scientific ones included, are `#VALUE!` (`TEXT(1E+255,"0")`,
+  `TEXT(1,"0;0."&REPT("0",128))`); a
   fraction of 2^53 or more units and a scientific layout with a zero mantissa
   and no `0` placeholder or with a decimal point but no shown decimal digit
   are `calculation.unsupported_expression`. `General` shows a number of up to 11
@@ -1474,7 +1479,9 @@ than guessing a name from a different XLSX crate (`calamine`,
   groups thousands with `,` unless `no_commas` is true
   (`FIXED(-1234.567,-1,TRUE)` is `-1230`). `DOLLAR` shows `$#,##0.00` with the
   absolute value and wraps a negative number in parentheses. A result longer
-  than 255 characters is `#VALUE!` (`FIXED(1E+190,2)`).
+  than 255 characters is `#VALUE!` (`FIXED(1E+190,2)`), and a positive
+  `DOLLAR` result keeps room for the parenthesis, so 255 characters are
+  `#VALUE!` too (`DOLLAR(1E+190,0)`).
 - The nine names `LENB`, `LEFTB`, `RIGHTB`, `MIDB`, `FINDB`, `SEARCHB`,
   `REPLACEB`, `ASC`, and `DBCS`, added in 0.1.27, follow the locale profile's
   double-byte rules. Under `Locale::EnUs` a character counts its UTF-16 code
@@ -1703,8 +1710,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   `LocaleProfile::new(Locale)` follows one locale for the regional format and
   for generated labels, and `.with_display_language(Locale)` sets the labels
   apart; `.locale()` and `.display_language()` read them back. `Locale` is
-  `#[non_exhaustive]` with `EnUs` (the default, which keeps every earlier
-  result) and `KoKr`; both use `.` and `,` as decimal and thousands
+  `#[non_exhaustive]` with `EnUs` (the default) and `KoKr`; both use `.` and `,` as decimal and thousands
   separators. The regional format decides the `DOLLAR` currency symbol (`$`
   or `₩`; both default to two decimals and parenthesize a negative amount,
   as in `(₩1.50)`), the currency symbol text may carry when it reads as a
@@ -1728,8 +1734,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   than 11 characters is unsupported, and a `*` fill is unsupported because the
   width is not an input.
   `DisplayFormatError::Unsupported` (`.code()` `display_format.unsupported`)
-  covers every construct `TEXT` leaves unsupported and numbers past 2^53
-  rounded units. Interop `format_display_text(DisplayFormatRequestDto { value,
+  covers every construct `TEXT` leaves unsupported, fractions of 2^53 or more
+  units, and results `TEXT` rejects with `#VALUE!`. Interop `format_display_text(DisplayFormatRequestDto { value,
   format_code, date_system, locale_profile }) -> DisplayFormatResultDto { text }`
   takes a `WritableCellValueDto` and `DateSystemDto` (`"excel_1900"`, the
   default, or `"excel_1904"`); Python `format_display_text(value, format_code,
@@ -1738,24 +1744,28 @@ than guessing a name from a different XLSX crate (`calamine`,
   take the `{kind, value}` cell values `read_range` returns, and MCP has the
   sessionless `format_display_text` tool. A request bindings cannot read is
   `interop.display_format.request_invalid`.
-- **Two numeric-compatibility axes, both defaulting to Excel's behavior rather
-  than to what 0.1.2 did.** `ArithmeticSemantics`: `ExcelNearZero` (default)
+- **Two numeric-compatibility axes, both defaulting to Excel's behavior.**
+  `ArithmeticSemantics`: `ExcelNearZero` (default)
   corrects the addition or subtraction a formula ends with, unparenthesized,
-  and the final addition of `SUM`, `AVERAGE`, `SUBTOTAL`, and `AGGREGATE`
-  totals, to zero when the result is below eight units in the last place of
-  the larger operand, as Excel does. Thus `=0.1+0.2-0.3` and
+  and the final addition of `SUM`, `AVERAGE`, `AVERAGEA`, `SUBTOTAL`, and
+  `AGGREGATE` totals, to zero when the result is below eight units in the last
+  place of the larger operand, reading text operands as the operator does,
+  as Excel does. Thus `=0.1+0.2-0.3` and
   `=SUM(0.1,0.2,-0.3)` are `0`, while `=(0.1+0.2-0.3)`, `=0.1+0.2-0.3=0`
   (`FALSE`), `=100.1-100-0.1`, `SUMIF(S)`, `SUMPRODUCT`, and `NPV` keep the
   residue. `Ieee754` leaves every residue. The default also compares numbers
-  that differ only past their fifteenth significant digit as equal in the
-  comparison operators, `SWITCH`, and `COUNTIF`-style and database criteria
-  (`=0.1+0.2=0.3` is `TRUE`), and reads a scaled quotient to fifteen digits
-  before rounding in `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `MROUND`,
-  `CEILING`, `FLOOR` and their variants, and `PERCENTRANK`
-  (`ROUND(1.005,2)` is `1.01`); lookups, sorting, and `UNIQUE` keep exact
-  equality. `Ieee754` compares and rounds the binary values. In either mode a
-  number joined to text is rounded to fifteen significant digits and written
-  in scientific notation past twenty characters (`2/3&""` is
+  by their roundings to fifteen significant digits in the comparison
+  operators, `SWITCH`, and `COUNTIF`-style and database criteria
+  (`=0.1+0.2=0.3` and `=1=1+4E-15` are `TRUE`, `=1+4E-15=1+6E-15` is
+  `FALSE`), and reads a number to fifteen digits before rounding in `ROUND`,
+  `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `MROUND`, `CEILING`, `FLOOR` and their
+  variants, `PERCENTRANK`, `TEXT`, `FIXED`, and `DOLLAR` (`ROUND(1.005,2)` is
+  `1.01`); lookups, sorting, and `UNIQUE` keep exact equality. `Ieee754`
+  compares and rounds the binary values. Fifteen-digit rounding takes a tie
+  toward zero, as Excel does (`ROUND(1234567890123470+5,-1)` is
+  `1234567890123470`). In either mode a number joined to text is rounded to
+  fifteen significant digits and written in scientific notation past twenty
+  characters (`2/3&""` is
   `0.666666666666667`, `1E+20&""` is `1E+20`), and a number written in a
   formula keeps fifteen significant digits (`1234567890123456` reads as
   `1234567890123450`).
@@ -1763,24 +1773,30 @@ than guessing a name from a different XLSX crate (`calamine`,
   `VALUE`, direct arguments of `SUM`, `COUNT`, and the statistics, criteria,
   and holidays — reads as Excel reads a typed entry, in either mode: spaces
   around it are ignored; it may hold thousands separators (`1,234`), an
-  exponent, a percent sign before or after the number, parentheses for a
-  negative number, the locale's currency symbol, a whole number and a
+  exponent, a percent sign before or after the number or inside the
+  parentheses (`(5%)`), parentheses for a negative number, the locale's
+  currency symbol, spaces after a sign, percent sign, currency symbol, or
+  opening parenthesis (`- 5`), a whole number and a
   fraction (`1 1/2`), a date (`2024-01-15`, `2024/1/5`, and under `EnUs`
   `1/15/2024` or `1/15/24`), a time (`14:30:15.5`, `2:30 PM`, `25:00`), or a
   date and a time. Digits past the fifteenth read as zeros. Other text,
   including forms Excel reads from the current date (`1/2`), month names,
   minutes or seconds past 59, and whitespace other than spaces, is
-  `#VALUE!`. In criteria an equality reads text cells the same way
+  `#VALUE!`, and a criterion holding such text compares it as text, so
+  `">=1/2"` counts no date cell where Excel counts the dates from January 2
+  of the current year. In criteria an equality reads text cells the same way
   (`COUNTIF(r,1000)` counts the text `1,000`), `<>` counts such a text cell
   as unequal, and an ordering compares number cells only. `MATCH` with match
   type 0 matches a number with number cells only. `AND`, `OR`, and `XOR` skip
-  a text argument other than `TRUE` and `FALSE`.
+  a direct text argument other than `TRUE` and `FALSE` and every text in a
+  referenced cell.
   `FinancialSolverSemantics`: `ExcelIterationBudget` (default) applies
   Microsoft's per-function budget — 20 iterations/`1e-7` for `IRR` and `RATE`,
   100/`1e-8` for `XIRR` — so inputs Excel abandons yield `#NUM!` here too;
-  `ExtendedSearch` searches longer, as 0.1.2 did. **Upgrading from 0.1.2
-  changes calculated numbers unless you select `ArithmeticSemantics::Ieee754`
-  and `FinancialSolverSemantics::ExtendedSearch`.** Both axes are also carried
+  `ExtendedSearch` searches longer, as 0.1.2 did. `ArithmeticSemantics::Ieee754`
+  and `FinancialSolverSemantics::ExtendedSearch` select what 0.1.2 did in
+  those two places only; number reading and writing and the other function
+  semantics follow Excel in every mode. Both axes are also carried
   by the interop DTO and the Python, Node.js, and MCP boundaries.
   The random seed is carried the same way: `CalculationOptionsDto.random_seed`
   and the transaction report's `calculation_options.random_seed`, Python

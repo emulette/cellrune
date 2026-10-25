@@ -246,6 +246,42 @@ fn collection_arguments_follow_excel_direct_and_range_coercion_rules() {
 }
 
 #[test]
+fn and_or_and_xor_skip_text_in_references() {
+    // Mac Excel 16.114: text in a referenced cell, `TRUE` included, takes no part.
+    let mut sheet = Sheet::new(
+        SheetId::new(1).expect("valid sheet ID"),
+        SheetName::new("Sheet1").expect("valid sheet name"),
+        SheetVisibility::Visible,
+    );
+    insert_literal(&mut sheet, 1, 1, CellValue::Text("x".to_owned()));
+    insert_literal(&mut sheet, 2, 1, CellValue::Text("TRUE".to_owned()));
+    insert_literal(&mut sheet, 3, 1, CellValue::Text("0".to_owned()));
+    for (row, formula) in [
+        (1, "AND(A1,TRUE)"),
+        (2, "AND(A1:A1,TRUE)"),
+        (3, "AND(A3,TRUE)"),
+        (4, "OR(A1,FALSE)"),
+        (5, "XOR(A1,TRUE)"),
+        (6, "AND(A2)"),
+        (7, "OR(A2)"),
+        (8, "AND(A1)"),
+    ] {
+        insert_formula(&mut sheet, row, 2, formula);
+    }
+    let workbook = workbook_with_sheet(sheet);
+
+    let calculation = calculate_workbook(&workbook, CalculationOptions::default());
+    for row in 1..=3 {
+        assert_cell_logical(&calculation, row, 2, true);
+    }
+    assert_cell_logical(&calculation, 4, 2, false);
+    assert_cell_logical(&calculation, 5, 2, true);
+    for row in 6..=8 {
+        assert_cell_error(&calculation, row, 2, ExcelError::Value);
+    }
+}
+
+#[test]
 fn second_expansion_wave_matches_documented_examples_and_aliases() {
     let normal_cumulative = 0.5 * libm::erfc(-1.0 / std::f64::consts::SQRT_2);
     let normal_density = (-0.5_f64).exp() / (2.0 * std::f64::consts::PI).sqrt();
@@ -426,6 +462,15 @@ fn rounding_reads_the_scaled_quotient_to_fifteen_significant_digits() {
             0.23,
             0.0,
         ),
+        // Mac Excel 16.114: a tie past the fifteenth digit reads toward zero, and a place past it
+        // leaves the value unchanged for negative digit counts too.
+        number("ROUND(1234567890123470+5,-1)", 1_234_567_890_123_470.0, 0.0),
+        number("ROUND(123456789012344+0.5,0)", 123_456_789_012_344.0, 0.0),
+        number(
+            "(ROUND(1.23456789012345E+20,-2)-1.23456789012345E+20)*1",
+            0.0,
+            0.0,
+        ),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 
@@ -453,6 +498,18 @@ fn numbers_join_text_with_fifteen_digits_and_literals_keep_fifteen() {
         number("LEN(1/3)", 17.0, 0.0),
         logical("0.30000000000000004=0.3", true),
         number("(0.30000000000000004-0.3)*1E+17", 0.0, 0.0),
+        // Mac Excel 16.114: a tie past the fifteenth digit rounds toward zero.
+        text("(1234567890123450+5)&\"\"", "1234567890123450"),
+        text("(-1234567890123450-5)&\"\"", "-1234567890123450"),
+        // Comparison rounds both numbers to fifteen significant digits.
+        logical("1=1+4E-15", true),
+        logical("1+4E-15=1+6E-15", false),
+        logical("9=9+3E-14", false),
+        logical("5=5+5E-15", false),
+        logical("0.3=0.3+6E-16", false),
+        logical("1E+15=1E+15+4", true),
+        // The root correction reads text operands as the operator does.
+        number("0.1+0.2-\"0.3\"", 0.0, 0.0),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 
@@ -543,6 +600,19 @@ fn text_reads_as_a_number_in_the_forms_excel_accepts() {
         number("ROUND(\"1,234.567\",1)", 1_234.6, 0.0),
         error("VALUE(\"1,2\")", ExcelError::Value),
         error("VALUE(\"(-5)\")", ExcelError::Value),
+        // Mac Excel 16.114 allows spaces after a sign, percent sign, currency symbol, or opening
+        // parenthesis, and a percent sign inside the parentheses.
+        number("VALUE(\"(5%)\")", -0.05, 0.0),
+        number("VALUE(\"( 5 %)\")", -0.05, 0.0),
+        number("VALUE(\"- 5\")", -5.0, 0.0),
+        number("VALUE(\"% 5\")", 0.05, 0.0),
+        number("VALUE(\"$ -5\")", -5.0, 0.0),
+        number(
+            "VALUE(\"1234567890123456 1/2\")",
+            1_234_567_890_123_450.5,
+            0.0,
+        ),
+        error("VALUE(\"-(5%)\")", ExcelError::Value),
         error("VALUE(\"$5%\")", ExcelError::Value),
         error("VALUE(\"inf\")", ExcelError::Value),
         error("VALUE(\"1E+308\")", ExcelError::Value),
@@ -911,7 +981,13 @@ fn text_fixed_and_dollar_round_and_format_as_mac_excel_16_114() {
         error("TEXT(TRUE,\"General\")", ExcelError::Value),
         error("TEXT(\"abc\",\"@;0\")", ExcelError::Value),
         error("TEXT(1E+255,\"0\")", ExcelError::Value),
+        error("TEXT(-1E+254,\"0\")", ExcelError::Value),
+        error("TEXT(1,\"0;0.\"&REPT(\"0\",128))", ExcelError::Value),
+        error("TEXT(1,\"0 nn\")", ExcelError::Value),
         error("FIXED(1E+190,2)", ExcelError::Value),
+        error("DOLLAR(1E+190,0)", ExcelError::Value),
+        number("LEN(DOLLAR(-1E+188,0))", 254.0, 0.0),
+        text("TEXT(1234567890123450+5,\"0\")", "1234567890123450"),
     ];
     let workbook = workbook_with_formula_cases(&cases);
 
@@ -929,6 +1005,8 @@ fn ieee754_formats_round_the_binary_value() {
         text("TEXT(2^60,\"0\")", "1152921504606846976"),
         text("FIXED(1.005,2)", "1.00"),
         text("DOLLAR(1.005)", "$1.00"),
+        text("TEXT(1234567.89,\"0.0000000000\")", "1234567.8899999999"),
+        text("TEXT(1,\"0.\"&REPT(\"0\",23))", "1.00000000000000000000000"),
         text("TEXT(\"abc\",\"0\")", "abc"),
     ];
     let workbook = workbook_with_formula_cases(&cases);

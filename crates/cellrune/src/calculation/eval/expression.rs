@@ -4,6 +4,7 @@ use std::sync::Arc;
 use super::{Engine, EvalContext};
 use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr};
+use crate::calculation::coerce::to_number;
 use crate::calculation::excel_digits::cancel_near_zero;
 use crate::calculation::functions::{
     BuiltinCallable, CallableShadow, DynamicFunction, Evaluator, FunctionResultKind,
@@ -66,15 +67,21 @@ fn evaluate_binary(
 ) -> Value {
     let excel_rules = matches!(arithmetic, ArithmeticSemantics::ExcelNearZero);
     let value = apply_binary(op, left, right, max_text_bytes, excel_rules, numeric_text);
-    match (op, place, left, right, value) {
-        (
-            BinaryOp::Add | BinaryOp::Subtract,
-            OperatorPlace::Root,
-            Value::Number(left),
-            Value::Number(right),
-            Value::Number(result),
-        ) if excel_rules => Value::Number(cancel_near_zero(*left, *right, result)),
-        (_, _, _, _, value) => value,
+    match (op, place, value) {
+        // The operands are read as the operator read them, so text that reads as a number cancels
+        // too: `=0.1+0.2-"0.3"` is `0` (Mac Excel 16.114).
+        (BinaryOp::Add | BinaryOp::Subtract, OperatorPlace::Root, Value::Number(result))
+            if excel_rules =>
+        {
+            match (
+                to_number(left, numeric_text),
+                to_number(right, numeric_text),
+            ) {
+                (Ok(left), Ok(right)) => Value::Number(cancel_near_zero(left, right, result)),
+                _ => Value::Number(result),
+            }
+        }
+        (_, _, value) => value,
     }
 }
 

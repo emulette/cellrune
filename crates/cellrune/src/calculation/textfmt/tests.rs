@@ -95,6 +95,13 @@ fn digits_round_the_fifteen_digit_decimal_half_away_from_zero() {
     assert_text(1.005e20, "0.00E+00", "1.01E+20");
     assert_text(12_345.0, "##0.0E+0", "12.3E+3");
     assert_text(999.999_999_999_999_9, "0.0E+0", "1.0E+3");
+    // A tie past the fifteenth digit rounds toward zero (Mac Excel 16.114).
+    assert_text(1_234_567_890_123_455.0, "0", "1234567890123450");
+    assert_text(12_345_678_901_234.75, "0.0", "12345678901234.7");
+    assert_text(1_234_567_890_123_456.0, "0", "1234567890123460");
+    // Subnormal magnitudes keep their exponent.
+    assert_text(f64::from_bits(1), "0.00E+00", "4.94E-324");
+    assert_text(5e-310, "0.00E+00", "5.00E-310");
 }
 
 #[test]
@@ -127,7 +134,14 @@ fn results_past_255_characters_or_127_decimals_are_rejected() {
     assert_eq!(text(1e252, "0.0").map(|text| text.len()), Ok(255));
     let decimals = |count: usize| format!("0.{}", "0".repeat(count));
     assert_eq!(text(1.0, &decimals(127)).map(|text| text.len()), Ok(129));
+    let scientific = |count: usize| format!("{}E+0", decimals(count));
+    assert_eq!(text(1.0, &scientific(127)).map(|text| text.len()), Ok(132));
     for (value, format) in [
+        (1.0, scientific(128)),
+        (1.0, format!("0;{}", decimals(128))),
+        (1.0, "0 nn".to_owned()),
+        (1.0, "nn".to_owned()),
+        (-1e254, "0".to_owned()),
         (1e255, "0".to_owned()),
         (1.5e300, "0".to_owned()),
         (1e240, "#,##0".to_owned()),
@@ -138,6 +152,20 @@ fn results_past_255_characters_or_127_decimals_are_rejected() {
         assert_eq!(text(value, &format), Err(ErrorKind::Value), "{value:e}");
     }
     assert_eq!(text(1e300, "0.0E+0").as_deref(), Ok("1.0E+300"));
+    // Text counts UTF-16 code units, as Excel does.
+    let emoji = |count: usize| "😀".repeat(count);
+    assert_eq!(
+        format_text(&emoji(127), "@", CONTEXT).map(|text| text.encode_utf16().count()),
+        Ok(254)
+    );
+    assert_eq!(
+        format_text(&emoji(128), "@", CONTEXT),
+        Err(ErrorKind::Value)
+    );
+    assert_eq!(
+        format_text("abc", &decimals(128), CONTEXT),
+        Err(ErrorKind::Value)
+    );
 }
 
 #[test]
@@ -152,6 +180,15 @@ fn binary_rounding_rounds_the_scaled_double() {
         (2_f64.powi(60), "0", "1152921504606846976"),
         (2.5, "0", "3"),
         (-0.001, "0.00", "0.00"),
+        // Digits past those a double holds show its exact binary expansion.
+        (
+            1.0,
+            "0.00000000000000000000000",
+            "1.00000000000000000000000",
+        ),
+        (1_234_567.89, "0.0000000000", "1234567.8899999999"),
+        (0.3, "0.0000000000000000000", "0.2999999999999999889"),
+        (f64::from_bits(1), "0.00E+00", "4.94E-324"),
     ] {
         assert_eq!(
             format_number(value, format, binary).as_deref(),

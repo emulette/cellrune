@@ -3,7 +3,8 @@
 //! Decimal and scientific layouts round half away from zero and pad with zeros counted by `0`
 //! placeholders. Under Excel's rules they round the number's fifteen-significant-digit decimal,
 //! so `TEXT(1.005,"0.00")` is `1.01`, `TEXT(0.285,"0%")` is `29%`, and `TEXT(2^60,"0")` is
-//! `1152921504606850000` (Mac Excel 16.114); otherwise they round the scaled binary value. As in
+//! `1152921504606850000` (Mac Excel 16.114); otherwise they round the exact decimal of the binary
+//! value. As in
 //! Excel, a zero integer part without a `0` placeholder shows nothing (`TEXT(0,"#")` is empty),
 //! the decimal point always shows (`TEXT(1,"0.#")` is `1.`), and a negative number shows its
 //! minus sign only when a nonzero digit shows (`TEXT(-0.001,"0.00")` is `0.00`).
@@ -14,10 +15,6 @@ use super::lexer::{Placeholder, Token};
 
 /// The first whole part a fraction layout cannot hold exactly.
 const MAX_UNITS: f64 = 9.007_199_254_740_992e15;
-
-/// The most decimal placeholders Excel accepts: `TEXT(1,"0."&REPT("0",128))` is `#VALUE!` (Mac
-/// Excel 16.114).
-const MAX_DECIMALS: usize = 127;
 
 /// Fraction denominators are searched up to this many digits.
 const MAX_DENOMINATOR_DIGITS: usize = 4;
@@ -133,18 +130,13 @@ struct Digits {
 }
 
 /// Rounds `magnitude` times `10^shift` half away from zero at `decimals` places. With `decimal`,
-/// the magnitude's fifteen-significant-digit decimal is rounded; otherwise the scaled binary
-/// value is.
-fn rounded_digits(
-    magnitude: f64,
-    shift: i32,
-    decimals: usize,
-    decimal: bool,
-) -> Result<Digits, ErrorKind> {
+/// the magnitude's fifteen-significant-digit decimal is rounded; otherwise the exact decimal of
+/// its binary value is.
+fn rounded_digits(magnitude: f64, shift: i32, decimals: usize, decimal: bool) -> Digits {
     let units = if decimal {
         decimal_units(magnitude, shift, decimals)
     } else {
-        binary_units(magnitude, shift, decimals)?
+        binary_units(magnitude, shift, decimals)
     };
     let padded = if units.len() <= decimals {
         format!("{}{units}", "0".repeat(decimals + 1 - units.len()))
@@ -152,11 +144,11 @@ fn rounded_digits(
         units
     };
     let split = padded.len() - decimals;
-    Ok(Digits {
+    Digits {
         integer: padded[..split].to_owned(),
         fraction: padded[split..].to_owned(),
         nonzero: padded.bytes().any(|digit| digit != b'0'),
-    })
+    }
 }
 
 /// The count of `10^-decimals` units in the fifteen-significant-digit decimal of `magnitude`
@@ -166,10 +158,52 @@ fn decimal_units(magnitude: f64, shift: i32, decimals: usize) -> String {
         return "0".to_owned();
     }
     let (significant, exponent) = fifteen_significant_decimal(magnitude);
-    // The first significant digit stands at `10^(exponent + shift)`.
-    let Ok(kept) = usize::try_from(
-        i64::from(exponent) + i64::from(shift) + 1 + i64::try_from(decimals).unwrap_or(i64::MAX),
-    ) else {
+    rounded_units(
+        &significant,
+        i64::from(exponent) + i64::from(shift),
+        decimals,
+    )
+}
+
+/// The count of `10^-decimals` units in the binary `magnitude` times `10^shift`, rounded half
+/// away from zero from its exact decimal expansion.
+fn binary_units(magnitude: f64, shift: i32, decimals: usize) -> String {
+    if magnitude == 0.0 {
+        return "0".to_owned();
+    }
+    let (significant, exponent) = exact_decimal(magnitude);
+    rounded_units(
+        &significant,
+        i64::from(exponent) + i64::from(shift),
+        decimals,
+    )
+}
+
+/// The exact decimal digits of a nonzero finite magnitude, as ASCII, and the power of ten the
+/// first one stands at; a double has at most 767 significant digits.
+fn exact_decimal(magnitude: f64) -> (Vec<u8>, i32) {
+    let text = format!("{magnitude:.766e}");
+    let (mantissa, exponent) = text
+        .split_once('e')
+        .expect("scientific formatting writes an exponent");
+    let digits = mantissa.bytes().filter(u8::is_ascii_digit).collect();
+    (digits, exponent.parse().expect("formatted exponent"))
+}
+
+/// The power of ten of the first significant digit of a nonzero finite magnitude, as it rounds.
+fn leading_power(magnitude: f64, decimal: bool) -> i32 {
+    if decimal {
+        fifteen_significant_decimal(magnitude).1
+    } else {
+        exact_decimal(magnitude).1
+    }
+}
+
+/// The count of `10^-decimals` units in the decimal whose `significant` digits start at
+/// `10^first_power`, rounded half away from zero.
+fn rounded_units(significant: &[u8], first_power: i64, decimals: usize) -> String {
+    let Ok(kept) = usize::try_from(first_power + 1 + i64::try_from(decimals).unwrap_or(i64::MAX))
+    else {
         return "0".to_owned();
     };
     let mut units = Vec::with_capacity(kept + 1);
@@ -191,21 +225,6 @@ fn decimal_units(magnitude: f64, shift: i32, decimals: usize) -> String {
         return "0".to_owned();
     }
     String::from_utf8(units).expect("ASCII digits")
-}
-
-/// The count of `10^-decimals` units in the binary `magnitude` times `10^shift`, rounded half
-/// away from zero.
-fn binary_units(magnitude: f64, shift: i32, decimals: usize) -> Result<String, ErrorKind> {
-    let scaled = if shift >= 0 {
-        magnitude * 10_f64.powi(shift)
-    } else {
-        magnitude / 10_f64.powi(-shift)
-    };
-    let units = (scaled * 10_f64.powi(decimals as i32)).round();
-    if !units.is_finite() {
-        return Err(ErrorKind::Num);
-    }
-    Ok(format!("{units:.0}"))
 }
 
 /// Applies the integer rules: zero padding to the count of `0` placeholders and no lone `0` when
@@ -326,9 +345,6 @@ fn render_decimal(
     };
     let integer_places = places_at(&integer_positions);
     let fraction_places = places_at(&fraction_positions);
-    if fraction_places.len() > MAX_DECIMALS {
-        return Err(ErrorKind::Value);
-    }
 
     let mut grouping = false;
     let mut thousands_scale = 0;
@@ -362,7 +378,7 @@ fn render_decimal(
 
     let percents = items.iter().filter(|item| **item == Item::Percent).count();
     let shift = 2 * percents as i32 - 3 * thousands_scale;
-    let digits = rounded_digits(value.abs(), shift, fraction_places.len(), decimal)?;
+    let digits = rounded_digits(value.abs(), shift, fraction_places.len(), decimal);
     let integer = integer_text(digits.integer, &integer_places);
     let fraction = fraction_slots(&digits.fraction, &fraction_places);
     let integer_slots = if grouping {
@@ -474,17 +490,11 @@ fn render_scientific(
     }
     let decimals = fraction_places.len();
     let (exponent, digits) = if magnitude == 0.0 {
-        (0, rounded_digits(0.0, 0, decimals, decimal)?)
+        (0, rounded_digits(0.0, 0, decimals, decimal))
     } else {
-        let mut exponent = magnitude.log10().floor() as i32;
-        if 10_f64.powi(exponent) > magnitude {
-            exponent -= 1;
-        } else if 10_f64.powi(exponent + 1) <= magnitude {
-            exponent += 1;
-        }
-        exponent = exponent.div_euclid(step) * step;
+        let mut exponent = leading_power(magnitude, decimal).div_euclid(step) * step;
         loop {
-            let digits = rounded_digits(magnitude, -exponent, decimals, decimal)?;
+            let digits = rounded_digits(magnitude, -exponent, decimals, decimal);
             if digits.integer.len() > step as usize {
                 exponent += step;
                 continue;

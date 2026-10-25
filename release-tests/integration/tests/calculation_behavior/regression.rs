@@ -147,6 +147,12 @@ fn regression_statistics_do_not_depend_on_the_scale_of_the_response() {
         ("A1", "=LINEST({1;3;2;5},{1;2;3;4},TRUE,TRUE)"),
         ("D1", "=LINEST({1E-8;3E-8;2E-8;5E-8},{1;2;3;4},TRUE,TRUE)"),
         ("G1", "=LINEST({1002;1004;1006;1008},{1;2;3;4},TRUE,TRUE)"),
+        // Σy² passes the double range while every statistic stays finite; Mac Excel 16.114
+        // returns the slope 1.4E+152.
+        (
+            "J1",
+            "=LINEST({7E153;7.1E153;7.3E153;7.4E153},{1;2;3;4},TRUE,TRUE)",
+        ),
     ] {
         draft
             .set_cell_dynamic_formula(
@@ -171,6 +177,8 @@ fn regression_statistics_do_not_depend_on_the_scale_of_the_response() {
         ("G1", 2.0, 1.0e-12),
         ("G3", 1.0, 0.0),
         ("H3", 0.0, 0.0),
+        ("J1", 1.4e152, 1.0e140),
+        ("K1", 6.85e153, 1.0e140),
     ] {
         assert_materialized_approx(&calculation, sheet_id, address, expected, tolerance);
     }

@@ -218,9 +218,10 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
         }
         let value = engine.eval_scalar(context, arg);
         if reference_rect(engine, context, arg).is_ok() {
-            if matches!(&value, Value::Blank)
-                || matches!(&value, Value::Text(text) if text.is_empty())
-            {
+            // Text in a referenced cell takes no part, `TRUE` included, as in a range: with A1
+            // holding the text `x`, `AND(A1,TRUE)` is `TRUE` and `AND(A1)` is `#VALUE!` (Mac Excel
+            // 16.114).
+            if matches!(&value, Value::Blank | Value::Text(_)) {
                 continue;
             }
             match to_logical(&value) {
