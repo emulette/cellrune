@@ -6,7 +6,7 @@
 use std::io::{Cursor, Write};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use cellrune::{ReadOptions, XlsxErrorCode, inspect_package};
+use cellrune::{ReadOptions, XlsxErrorCode, inspect_package, read_xlsx_bytes};
 use system_alloc_stats::SystemWithStats;
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
@@ -33,6 +33,21 @@ const ROOT_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 const WORKBOOK_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+const SHARED_STRING_CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>"#;
+
+const SHEET_WORKBOOK: &str = r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+
+const SHARED_STRING_WORKBOOK_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
 </Relationships>"#;
 
 #[test]
@@ -108,6 +123,58 @@ fn compressed_size_past_the_archive_end_is_rejected_before_reserving() {
         "peak heap {} bytes for a {}-byte archive declaring {declared} bytes",
         heap.peak_bytes,
         archive.len()
+    );
+}
+
+#[test]
+fn cells_naming_one_shared_string_share_its_text() {
+    const CELLS: usize = 1_000;
+    const TEXT_BYTES: usize = 16 * 1024;
+    let _serial = serial();
+    let shared_strings = format!(
+        r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>{}</t></si></sst>"#,
+        "x".repeat(TEXT_BYTES)
+    );
+    let rows = (1..=CELLS)
+        .map(|row| format!(r#"<row r="{row}"><c r="A{row}" t="s"><v>0</v></c></row>"#))
+        .collect::<String>();
+    let worksheet = format!(
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{rows}</sheetData></worksheet>"#
+    );
+    let bytes = build_archive(&[
+        (
+            "[Content_Types].xml",
+            SHARED_STRING_CONTENT_TYPES,
+            CompressionMethod::Stored,
+        ),
+        ("_rels/.rels", ROOT_RELATIONSHIPS, CompressionMethod::Stored),
+        ("xl/workbook.xml", SHEET_WORKBOOK, CompressionMethod::Stored),
+        (
+            "xl/_rels/workbook.xml.rels",
+            SHARED_STRING_WORKBOOK_RELATIONSHIPS,
+            CompressionMethod::Stored,
+        ),
+        (
+            "xl/sharedStrings.xml",
+            &shared_strings,
+            CompressionMethod::Stored,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            &worksheet,
+            CompressionMethod::Stored,
+        ),
+    ]);
+
+    let (workbook, heap) = measure(|| read_xlsx_bytes(&bytes, ReadOptions::default()));
+
+    let workbook = workbook.expect("shared string workbook must read");
+    assert_eq!(workbook.sheets()[0].len(), CELLS);
+    // A copy of the text in every cell would hold 16 MiB.
+    assert!(
+        heap.peak_bytes < 4 * 1024 * 1024,
+        "peak heap {} bytes for {CELLS} cells naming one {TEXT_BYTES}-byte string",
+        heap.peak_bytes
     );
 }
 

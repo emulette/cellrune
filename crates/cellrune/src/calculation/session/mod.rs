@@ -32,7 +32,7 @@ pub use error::{SessionError, SessionErrorCode};
 use impact::{
     affected_formulas, formula_cells, formula_cells_from_workbook, moved_cells,
     number_format_formulas, public_to_internal, sheet_name_readers, sheet_order_change,
-    table_readers, tables_covered_by, volatile_input_formulas,
+    table_readers, tables_covered_by, value_dependent_formulas, volatile_input_formulas,
 };
 pub use limits::{CancellationToken, SessionLimits};
 pub use transaction::{
@@ -619,23 +619,37 @@ impl WorkbookCalculationSession {
             }
             _ => BTreeSet::new(),
         };
-        let unsafe_dynamic = self
-            .compiled
-            .as_ref()
-            .is_some_and(|compiled| !compiled.incremental_safe())
-            && (self.calculation_changes_pending || !volatile_dirty.is_empty());
+        let changes_pending = self.calculation_changes_pending || !volatile_dirty.is_empty();
+        // A requested incremental pass needs targets that hold for any values. Another pass
+        // evaluates the formulas whose references depend on values with every edit instead.
+        let unsafe_dynamic = changes_pending
+            && self.compiled.as_ref().is_some_and(|compiled| {
+                if mode == RecalculationMode::Incremental {
+                    !compiled.incremental_safe()
+                } else {
+                    !compiled.follows_edits()
+                }
+            });
+        let value_dependent_dirty = match &self.compiled {
+            Some(compiled) if changes_pending && !structural_rebuild && !unsafe_dynamic => {
+                value_dependent_formulas(self.workbook(), compiled, &cancelled)
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
+            }
+            _ => BTreeSet::new(),
+        };
         // Only an automatic recalculation updates the compiled state for formula edits; a
         // requested mode compiles the workbook again.
         let formula_edits_pending = !self.formula_edits.is_empty();
         let compile_required = structural_rebuild
             || unsafe_dynamic
             || (formula_edits_pending && mode != RecalculationMode::Auto);
-        let pending_dirty = if volatile_dirty.is_empty() {
+        let pending_dirty = if volatile_dirty.is_empty() && value_dependent_dirty.is_empty() {
             Cow::Borrowed(&self.dirty)
         } else {
             let mut dirty = clone_set_cancellable(&self.dirty, &cancelled)
                 .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
             dirty.extend(volatile_dirty);
+            dirty.extend(value_dependent_dirty);
             Cow::Owned(dirty)
         };
 
@@ -1036,26 +1050,23 @@ impl PreparedCalculation {
         let mut execution_mode = self.execution_mode;
         let mut reason = self.reason;
         let mut dirty_count = self.dirty.len();
-        let (calculation, compiled, work, parsed_formula_count) =
+        let formula_count = || {
+            formula_cells_from_workbook(&self.workbook, &|| self.cancellation.is_cancelled())
+                .map(|formulas| formulas.len())
+                .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))
+        };
+        // The work of a pass from the compiled state that the workbook outgrew.
+        let mut discarded = None;
+        let from_compiled =
             if self.compile_required || (!self.formula_edits.is_empty() && recompiled.is_none()) {
                 if !self.compile_required {
                     // The compiled state could not take the formula edits, so the pass compiles the
                     // workbook again as any other topology change does, with every formula dirty.
                     execution_mode = CalculationExecutionMode::Full;
                     reason = CalculationDecisionReason::TopologyChanged;
-                    dirty_count = formula_cells_from_workbook(&self.workbook, &|| {
-                        self.cancellation.is_cancelled()
-                    })
-                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?
-                    .len();
+                    dirty_count = formula_count()?;
                 }
-                let (calculation, compiled, work) =
-                    calculate_and_compile(&self.workbook, self.options, || {
-                        self.cancellation.is_cancelled()
-                    })
-                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-                let parsed = compiled.formula_count();
-                (Arc::new(calculation), Arc::new(compiled), work, parsed)
+                None
             } else {
                 let (compiled, parsed) = match recompiled {
                     Some(recompiled) => (
@@ -1081,8 +1092,44 @@ impl PreparedCalculation {
                     || self.cancellation.is_cancelled(),
                 )
                 .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-                (Arc::new(calculation), compiled, work, parsed)
+                match calculation {
+                    Some(calculation) => Some((Arc::new(calculation), compiled, work, parsed)),
+                    // A formula's references moved off the targets the state was compiled with, so
+                    // the pass compiles the workbook again, with every formula dirty, unless the
+                    // caller required an incremental pass.
+                    None if self.reason == CalculationDecisionReason::IncrementalRequested => {
+                        return Err(SessionError::new(
+                            SessionErrorCode::IncrementalUnsafe,
+                            Some(incremental_unsafe_detail(false, false, true)),
+                        ));
+                    }
+                    None => {
+                        if execution_mode == CalculationExecutionMode::Incremental {
+                            execution_mode = CalculationExecutionMode::Full;
+                            reason = CalculationDecisionReason::DynamicTopology;
+                            dirty_count = formula_count()?;
+                        }
+                        discarded = Some(work);
+                        None
+                    }
+                }
             };
+        let (calculation, compiled, mut work, parsed_formula_count) = match from_compiled {
+            Some(calculated) => calculated,
+            None => {
+                let (calculation, compiled, work) =
+                    calculate_and_compile(&self.workbook, self.options, || {
+                        self.cancellation.is_cancelled()
+                    })
+                    .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
+                let parsed = compiled.formula_count();
+                (Arc::new(calculation), Arc::new(compiled), work, parsed)
+            }
+        };
+        if let Some(discarded) = discarded {
+            work.function_iterations += discarded.function_iterations;
+            work.reference_cells += discarded.reference_cells;
+        }
         if self.cancellation.is_cancelled() {
             return Err(SessionError::new(SessionErrorCode::Cancelled, None));
         }
@@ -1128,7 +1175,7 @@ impl PreparedCalculation {
                 &|| self.cancellation.is_cancelled(),
             )
             .map_err(|()| SessionError::new(SessionErrorCode::Cancelled, None))?;
-        Ok(recompiled.filter(|recompiled| recompiled.compiled.incremental_safe()))
+        Ok(recompiled.filter(|recompiled| recompiled.compiled.follows_edits()))
     }
 
     /// Executes the job without mutating the source session.

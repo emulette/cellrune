@@ -1073,7 +1073,7 @@ fn source_style<'styles>(
     };
     styles
         .format(index)
-        .map(|number_format| (index, number_format))
+        .map(|number_format| (index, number_format.as_ref()))
 }
 
 fn model_pane(

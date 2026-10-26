@@ -1861,13 +1861,14 @@ impl Engine<'_> {
     /// Reports whether `expr` holds a reference whose cells depend on values in a way `usage`
     /// cannot follow.
     ///
-    /// For incremental calculation every dynamic reference counts, and so does a range with an
-    /// end such as INDEX when a formula or an array result lies in its reach: calculation order
-    /// follows only the cells the range covers when its dependencies are collected, so those
-    /// cells may be read out of order once the end moves. Literal cells in the reach are safe to
-    /// read in any order. Draft impact analysis follows the cells an OFFSET resolves to now, so
-    /// only an OFFSET it cannot resolve counts there, besides INDIRECT, whose text can name any
-    /// sheet or name.
+    /// For incremental calculation every dynamic reference counts except an OFFSET of a cell or
+    /// range reference by constant offsets and size, whose cells never move, and so does a range
+    /// with an end such as INDEX
+    /// when a formula or an array result lies in its reach: calculation order follows only the
+    /// cells the range covers when its dependencies are collected, so those cells may be read out
+    /// of order once the end moves. Literal cells in the reach are safe to read in any order.
+    /// Draft impact analysis follows the cells an OFFSET resolves to now, so only an OFFSET it
+    /// cannot resolve counts there, besides INDIRECT, whose text can name any sheet or name.
     fn expr_contains_dynamic_reference_function(
         &self,
         usage: DynamicReferenceUse,
@@ -1924,8 +1925,9 @@ impl Engine<'_> {
                     }
                     if let Some(DependencyKind::DynamicReference(kind)) =
                         function_dependency_kind(name)
-                        && (usage == DynamicReferenceUse::Incremental
-                            || kind == DynamicReferenceKind::Indirect
+                        && (kind == DynamicReferenceKind::Indirect
+                            || (usage == DynamicReferenceUse::Incremental
+                                && !offsets_fixed_cells(args))
                             || !self.dynamic_rect_resolves_without_formulas(context, kind, args))
                     {
                         return true;
@@ -2092,6 +2094,35 @@ pub(super) fn rects_intersect(left: &Rect, right: &Rect) -> bool {
         && right.row_start <= left.row_end
         && left.col_start <= right.col_end
         && right.col_start <= left.col_end
+}
+
+/// Whether OFFSET `args` name the same cells in every calculation: a cell or range reference
+/// moved by constant offsets to a constant size.
+fn offsets_fixed_cells(args: &[Expr]) -> bool {
+    let Some((base, positions)) = args.split_first() else {
+        return false;
+    };
+    let fixed_base = match base {
+        Expr::Ref(_) => true,
+        Expr::Range { start, end } => {
+            matches!((start.as_ref(), end.as_ref()), (Expr::Ref(_), Expr::Ref(_)))
+        }
+        _ => false,
+    };
+    fixed_base && positions.iter().all(is_constant)
+}
+
+/// Whether `expr` evaluates to the same value in every calculation: literals and operators over
+/// them, without references, names, or calls.
+fn is_constant(expr: &Expr) -> bool {
+    crate::calculation::stack::grow(|| match expr {
+        Expr::Number(_) | Expr::Text(_) | Expr::Logical(_) | Expr::ErrorLit(_) | Expr::Missing => {
+            true
+        }
+        Expr::Paren(inner) | Expr::Unary { operand: inner, .. } => is_constant(inner),
+        Expr::Binary { left, right, .. } => is_constant(left) && is_constant(right),
+        _ => false,
+    })
 }
 
 #[cfg(test)]

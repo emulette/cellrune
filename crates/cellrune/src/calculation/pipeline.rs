@@ -275,6 +275,9 @@ fn calculation_work(workbook: &WorkbookSnapshot, engine: &Engine<'_>) -> Calcula
     }
 }
 
+/// Calculates `workbook` with the formulas and order of `compiled`, and returns the work it
+/// did with the calculation, which is `None` when `compiled` no longer holds for the values, so
+/// that only compiling the workbook again gives its result.
 pub(super) fn calculate_from_compiled(
     workbook: &WorkbookSnapshot,
     options: CalculationOptions,
@@ -282,10 +285,13 @@ pub(super) fn calculate_from_compiled(
     previous: Option<&CalculationSnapshot>,
     dirty: Option<&BTreeSet<CalculationCellId>>,
     cancelled: impl Fn() -> bool,
-) -> Result<(CalculationSnapshot, CalculationWork), ()> {
-    let engine =
+) -> Result<(Option<CalculationSnapshot>, CalculationWork), ()> {
+    let (engine, stale) =
         Engine::evaluate_compiled(workbook, options, compiled, previous, dirty, &cancelled)?;
     let work = calculation_work(workbook, &engine);
+    if stale {
+        return Ok((None, work));
+    }
     let snapshot = match (previous, dirty) {
         (Some(previous), Some(dirty)) => {
             // The pass also evaluates formulas outside `dirty` whose kept results it read, and
@@ -306,7 +312,7 @@ pub(super) fn calculate_from_compiled(
         }
         _ => snapshot_from_engine_cancellable(workbook, options, &engine, &cancelled)?,
     };
-    Ok((snapshot, work))
+    Ok((Some(snapshot), work))
 }
 
 fn snapshot_from_incremental_engine_cancellable(

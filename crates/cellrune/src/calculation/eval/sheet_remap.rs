@@ -105,6 +105,7 @@ impl CompiledWorkbook {
             limits: self.limits,
             undeclared_dynamic_arrays: self.undeclared_dynamic_arrays,
             unstable_formulas: Arc::new(cells(&self.unstable_formulas)),
+            graph_follows_values: self.graph_follows_values,
             volatile_formulas: Arc::new(VolatileFormulas {
                 today: list(&self.volatile_formulas.today),
                 now: list(&self.volatile_formulas.now),

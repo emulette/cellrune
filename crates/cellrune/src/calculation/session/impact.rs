@@ -126,6 +126,25 @@ pub(super) fn affected_formula_impact(
     })
 }
 
+/// Returns the formulas whose references depend on values and every formula depending on them:
+/// what an edit can change through the cells such a formula reads now, which the targets it was
+/// compiled with may no longer cover.
+pub(super) fn value_dependent_formulas(
+    workbook: &WorkbookSnapshot,
+    compiled: &CompiledWorkbook,
+    cancelled: &impl Fn() -> bool,
+) -> Result<BTreeSet<CalculationCellId>, ()> {
+    let impact = reader_impact(
+        workbook,
+        compiled,
+        compiled.value_dependent_formulas(),
+        cancelled,
+    )?;
+    let mut all = impact.direct;
+    all.extend(impact.transitive);
+    Ok(all)
+}
+
 /// Returns the formulas that read a changed volatile input and every formula depending on them.
 pub(super) fn volatile_input_formulas(
     workbook: &WorkbookSnapshot,

@@ -281,6 +281,20 @@ impl Cell {
         }
     }
 
+    /// Constructs a cell sharing `content` and `number_format` with other cells, as cells
+    /// read from one shared string or style do.
+    pub(crate) const fn from_shared(
+        address: CellAddress,
+        content: Arc<CellContent>,
+        number_format: Arc<NumberFormat>,
+    ) -> Self {
+        Self {
+            address,
+            content,
+            number_format,
+        }
+    }
+
     pub(crate) fn with_number_format(
         address: CellAddress,
         content: CellContent,

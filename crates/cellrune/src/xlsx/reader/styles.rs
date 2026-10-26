@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use quick_xml::events::Event;
 
@@ -23,7 +24,8 @@ const FORMAT_RECORD: &[u8] = b"xf";
 
 #[derive(Debug)]
 pub(super) struct Styles {
-    formats: Vec<NumberFormat>,
+    /// The number format of each `cellXfs` entry, shared by the cells using it.
+    formats: Vec<Arc<NumberFormat>>,
     cell_formats: Vec<CellFormat>,
     font_count: u32,
 }
@@ -42,7 +44,7 @@ struct StyleParseState {
 }
 
 impl Styles {
-    pub(super) fn format(&self, style_index: usize) -> Option<&NumberFormat> {
+    pub(super) fn format(&self, style_index: usize) -> Option<&Arc<NumberFormat>> {
         self.formats.get(style_index)
     }
 
@@ -60,7 +62,7 @@ impl Styles {
 impl Default for Styles {
     fn default() -> Self {
         Self {
-            formats: vec![NumberFormat::default()],
+            formats: vec![Arc::new(NumberFormat::default())],
             cell_formats: vec![canonical_default_format()],
             font_count: 1,
         }
@@ -144,7 +146,12 @@ pub(super) fn parse(
     let formats = state
         .cell_format_ids
         .into_iter()
-        .map(|id| make_number_format(id, state.custom_formats.get(&id).map(AsRef::as_ref)))
+        .map(|id| {
+            Arc::new(make_number_format(
+                id,
+                state.custom_formats.get(&id).map(AsRef::as_ref),
+            ))
+        })
         .collect();
     Ok(Styles {
         formats,

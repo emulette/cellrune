@@ -209,6 +209,21 @@ inventories, and measurements belong in the linked documentation rather than in 
   they then count as hidden by hand, where Excel shows them again.
 - The interop schema version is 2, for the renamed limit below. The Node.js binding checks it; a
   client that checks the version accepts 2.
+- An `Auto` session recalculation no longer compiles the whole workbook again after every edit
+  when a formula holds `INDIRECT`, an `OFFSET` other than one of a cell or range reference by
+  constant positions and size, or a range ending in `INDEX` that reaches formulas. Such formulas
+  and their dependents are evaluated again with each edit in the dirty subset, so the delta reports
+  `Incremental` with `DirtySubset` where it reported `Full` with `DynamicTopology`, and formula
+  edits recompile in place. An edit that moves one of them to other cells, a workbook holding one
+  in or behind a cycle or leaving formulas out at the dependency limit, and one whose references
+  took more than one calculation pass to resolve still compile the workbook again with
+  `DynamicTopology`. An `OFFSET` of a cell or range reference by constant
+  positions and size reads as a fixed range, so forced `Incremental` accepts it. Results are
+  unchanged.
+- Reading an XLSX keeps one copy of each shared string for all the literal cells naming it, and
+  one number format for all the cells of a style, instead of one per cell. A workbook whose cells
+  repeat a few long strings reads with a fraction of the memory. `max_total_cell_text_bytes` still
+  counts the text of every cell.
 
 ### Removed
 

@@ -972,11 +972,11 @@ impl SheetBuilder {
     }
 
     /// Adds a cell with the validation and metadata tracking of [`Sheet::insert_cell`].
-    pub(crate) fn insert_cell_with_number_format(
+    pub(crate) fn insert_shared_cell(
         &mut self,
         address: CellAddress,
-        content: CellContent,
-        number_format: NumberFormat,
+        content: Arc<CellContent>,
+        number_format: Arc<NumberFormat>,
     ) -> Result<(), ValidationError> {
         let Entry::Vacant(entry) = self.cells.entry(CellStore::key(address)) else {
             return Err(ValidationError::DuplicateCell {
@@ -987,7 +987,7 @@ impl SheetBuilder {
         self.sheet.track_formula_metadata(address, &content);
         self.sheet.update_bounds(address);
         self.sheet.update_column_extent(address);
-        entry.insert(Cell::with_number_format(address, content, number_format));
+        entry.insert(Cell::from_shared(address, content, number_format));
         Ok(())
     }
 

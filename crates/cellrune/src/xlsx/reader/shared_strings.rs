@@ -11,7 +11,7 @@ use super::super::xstring::XstringDecoder;
 use super::super::{ReadLimits, XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
 use super::phonetic::{PhoneticItemBuilder, PhoneticReadBudget};
-use crate::PhoneticAnnotation;
+use crate::{CellContent, CellValue, PhoneticAnnotation};
 
 const SHARED_STRING_TABLE: &[u8] = b"sst";
 const SHARED_STRING_ITEM: &[u8] = b"si";
@@ -21,7 +21,8 @@ const PHONETIC_PROPERTIES: &[u8] = b"phoneticPr";
 
 #[derive(Debug)]
 struct SharedString {
-    text: String,
+    /// The text as the content of the literal cells naming it, which share it.
+    cell: Arc<CellContent>,
     annotation: Option<Arc<PhoneticAnnotation>>,
     overlaps_or_reorders: bool,
 }
@@ -31,7 +32,15 @@ pub(super) struct SharedStrings(Vec<SharedString>);
 
 impl SharedStrings {
     pub(super) fn get(&self, index: usize) -> Option<&str> {
-        self.0.get(index).map(|item| item.text.as_str())
+        match self.cell(index)?.as_ref() {
+            CellContent::Literal(CellValue::Text(text)) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Returns the content of a literal cell naming the item at `index`.
+    pub(super) fn cell(&self, index: usize) -> Option<&Arc<CellContent>> {
+        self.0.get(index).map(|item| &item.cell)
     }
 
     pub(super) fn annotation(&self, index: usize) -> Option<(Arc<PhoneticAnnotation>, bool)> {
@@ -361,7 +370,7 @@ fn finish_item(
         .transpose()?
         .flatten();
     strings.push(SharedString {
-        text: value,
+        cell: Arc::new(CellContent::Literal(CellValue::Text(value))),
         annotation: completed
             .as_ref()
             .map(|completed| Arc::clone(&completed.annotation)),

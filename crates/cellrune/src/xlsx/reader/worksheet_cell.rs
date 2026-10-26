@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use super::super::error::{compatibility, detail};
 use super::super::xml::{XmlAttributes, XmlBudget};
 use super::super::xstring::XstringDecoder;
 use super::super::{XlsxErrorCode, XlsxReadError};
 use super::PresentationCapture;
-use super::cell_value::{parse_cell_reference, parse_literal_value};
+use super::cell_value::{parse_cell_reference, parse_literal_value, parse_shared_string_cell};
 use super::formula_cell::{FormulaResultInput, RawFormula, SharedFormulaTable, finish_formula};
 use super::metadata::CellMetadata;
 use super::phonetic::{PhoneticItemBuilder, PhoneticReadBudget, parse_bool};
@@ -320,22 +322,30 @@ impl CellBuilder {
                     budget,
                 )?;
                 charge_formula_bytes(&formula, total_formula_bytes, budget)?;
-                Some(CellContent::Formula(formula))
+                Some(Arc::new(CellContent::Formula(formula)))
             }
             None => {
                 resolve_dynamic_array(self.metadata_index, resources.cell_metadata, budget)?;
-                parse_literal_value(
-                    &self.cell_type,
-                    self.value.as_deref(),
-                    inline_text,
-                    resources.shared_strings,
-                    resources.date_system,
-                    budget,
-                )?
-                .map(CellContent::Literal)
+                if self.cell_type.as_ref() == "s" {
+                    parse_shared_string_cell(
+                        self.value.as_deref(),
+                        resources.shared_strings,
+                        budget,
+                    )?
+                } else {
+                    parse_literal_value(
+                        &self.cell_type,
+                        self.value.as_deref(),
+                        inline_text,
+                        resources.shared_strings,
+                        resources.date_system,
+                        budget,
+                    )?
+                    .map(|value| Arc::new(CellContent::Literal(value)))
+                }
             }
         };
-        charge_cell_text_bytes(content.as_ref(), total_cell_text_bytes, budget)?;
+        charge_cell_text_bytes(content.as_deref(), total_cell_text_bytes, budget)?;
         let mut annotation = None;
         let mut overlaps_or_reorders = false;
         if self.capture == PresentationCapture::Document {
@@ -360,7 +370,7 @@ impl CellBuilder {
         }
         if annotation.is_some()
             && !matches!(
-                content.as_ref(),
+                content.as_deref(),
                 Some(CellContent::Literal(CellValue::Text(_)))
             )
         {
@@ -395,7 +405,7 @@ impl CellBuilder {
         let number_format = resources
             .styles
             .format(self.style_index)
-            .cloned()
+            .map(Arc::clone)
             .ok_or_else(|| {
                 budget
                     .error(XlsxErrorCode::InvalidStyleIndex)
@@ -407,7 +417,7 @@ impl CellBuilder {
                 .insert_valued_cell(self.address, self.style_index);
         }
         sheet
-            .insert_cell_with_number_format(self.address, content, number_format)
+            .insert_shared_cell(self.address, content, number_format)
             .map_err(|error| {
                 budget
                     .error(XlsxErrorCode::InvalidWorksheet)

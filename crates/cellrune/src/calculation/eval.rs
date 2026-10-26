@@ -134,6 +134,9 @@ pub(super) struct CompiledWorkbook {
     undeclared_dynamic_arrays: bool,
     /// Formulas whose references depend on values in a way incremental calculation cannot follow.
     unstable_formulas: Arc<BTreeSet<CellId>>,
+    /// Whether the graph was collected with the values the dependency targets were, which a
+    /// calculation that stops after a later pass than the last collection does not guarantee.
+    graph_follows_values: bool,
     volatile_formulas: Arc<VolatileFormulas>,
 }
 
@@ -259,6 +262,24 @@ impl CompiledWorkbook {
 
     pub(super) fn incremental_safe(&self) -> bool {
         !self.undeclared_dynamic_arrays && self.unstable_formulas.is_empty()
+    }
+
+    /// Whether an automatic recalculation can follow edits from this state without compiling the
+    /// workbook again.
+    ///
+    /// Formulas whose references depend on values are evaluated again with every edit, and a
+    /// pass in which one of them resolves to other targets than it was compiled with compiles
+    /// the workbook instead. That needs a graph collected with the values of those targets. A
+    /// formula in a cycle or behind one is not evaluated, so its targets are never checked, and
+    /// the dependency limit may have left formulas out, so neither may be kept.
+    pub(super) fn follows_edits(&self) -> bool {
+        !self.undeclared_dynamic_arrays
+            && (self.unstable_formulas.is_empty()
+                || (self.graph_follows_values
+                    && self.dependency_limit_cells.is_empty()
+                    && self.unstable_formulas.iter().all(|cell| {
+                        !self.cycle_cells.contains(cell) && !self.blocked_cells.contains(cell)
+                    })))
     }
 
     pub(super) fn formula_count(&self) -> usize {
@@ -1191,6 +1212,9 @@ pub struct Engine<'workbook> {
     /// Whether a cell read during this pass found a formula that the pass calculates later, which
     /// means the dependency graph missed an edge the values now resolve.
     read_formula_before_calculation: Cell<bool>,
+    /// Whether `dependencies` was collected with the current results, which a compiled state
+    /// following edits needs.
+    graph_follows_values: bool,
     /// Formulas outside `dirty` whose kept unavailable result a read found.
     unavailable_previous_reads: RefCell<BTreeSet<CellId>>,
     function_iterations: u64,
@@ -1254,7 +1278,14 @@ impl<'workbook> Engine<'workbook> {
                 && !self.parse_failures.contains_key(&owner)
             {
                 self.record_target_dependency(owner);
-                self.record_formula_read_before_calculation(owner);
+                // A pass over dirty formulas reads the kept result of an owner outside them.
+                if self
+                    .dirty
+                    .as_ref()
+                    .is_none_or(|dirty| dirty.contains(&owner))
+                {
+                    self.record_formula_read_before_calculation(owner);
+                }
             }
             if let Some(value) = self.results.get(&owner) {
                 return ValueSource::Calculated(value);

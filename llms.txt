@@ -1083,15 +1083,22 @@ than guessing a name from a different XLSX crate (`calamine`,
   construction.
 - `session.recalculate(RecalculationMode::Auto, options, token)` returns a
   `CalculationDelta`. `Auto` uses a proven dirty subset and falls back to
-  full calculation for defined-name edits, options, or uncertain
-  dynamic/spill topology. After edits that only add, replace, or remove cell formulas,
+  full calculation for defined-name edits, options, or undeclared spill
+  topology. A formula whose references depend on values (`INDIRECT`, an
+  `OFFSET` other than one of a cell or range reference by constant
+  positions and size, a range ending in `INDEX` that reaches formulas) is
+  evaluated again with every edit, with its dependents, inside the dirty
+  subset. An edit that moves such a formula to other cells compiles the
+  workbook again and reports a full `DynamicTopology` pass, as does a
+  workbook holding one in or behind a cycle, leaving formulas out at the
+  dependency limit, or whose references took more than one calculation pass
+  to resolve. After edits that only add, replace, or remove cell formulas,
   `Auto` parses just those formulas, updates the dependency graph in place,
   and evaluates them and their dependents (`DirtySubset`, with the parsed
   count in `.parsed_formula_count()`); it compiles the workbook again
   (`TopologyChanged`) when an edited cell is or was part of an array
-  formula, an edit adds a reference incremental calculation cannot follow,
-  or the graph could reach `max_dependency_edges`, and reports
-  `DynamicTopology` when the workbook already held such a reference.
+  formula, an edit leaves a value-dependent reference in or behind a cycle,
+  or the graph could reach `max_dependency_edges`.
   Inserting, deleting, or moving rows, columns, or a range without changing
   a defined name or a table counts as editing the cells it vacated, filled,
   and rewrote; adding a sheet, or renaming one without changing a defined
@@ -1109,13 +1116,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   more than half of the workbook's or a defined name reads the sheet or table
   names.
   Forced `Incremental` fails closed when
-  unsafe, including after formula edits. When the only
+  unsafe, including after formula edits and with a value-dependent
+  reference. When the only
   options that differ from the installed calculation are the `TODAY()` serial,
   the `NOW()` serial, or the random seed, the dirty subset is the formulas
   calling a function that reads a changed input, directly or through defined
   names and `LAMBDA`, plus their dependents: `Auto` reports `DirtySubset`,
   `NoDirtyFormulas` when no formula reads the input, or a full
-  `DynamicTopology` pass under uncertain dynamic topology, and forced
+  `DynamicTopology` pass under the topology above, and forced
   `Incremental` proceeds. Any other option or limit change stays full.
 - `session.precedents(CalculationCellId) -> Option<CellPrecedents>` and
   `session.dependents(CalculationCellId) -> Option<CellDependents>` read the

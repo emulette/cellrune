@@ -25,10 +25,10 @@ impl CompiledWorkbook {
     ///
     /// Only the edited formulas are parsed, and only they and the formulas whose ranges cover a
     /// cell that became or stopped being a formula collect their dependencies again. A full
-    /// compilation is needed when this state left formulas out at the dependency limit or holds
-    /// references incremental calculation cannot follow, when an edited cell is or was part of an
-    /// array formula, and when the updated graph could reach `max_dependency_edges`: below it, no
-    /// full compilation could leave a formula out either.
+    /// compilation is needed when this state left formulas out at the dependency limit or cannot
+    /// follow edits, when an edited cell is or was part of an array formula, and when the updated
+    /// graph could reach `max_dependency_edges`: below it, no full compilation could leave a
+    /// formula out either.
     pub(in crate::calculation) fn with_formula_edits(
         &self,
         workbook: &WorkbookSnapshot,
@@ -38,7 +38,7 @@ impl CompiledWorkbook {
         cancelled: &impl Fn() -> bool,
     ) -> Result<Option<RecompiledWorkbook>, ()> {
         if !self.dependency_limit_cells.is_empty()
-            || !self.incremental_safe()
+            || !self.follows_edits()
             || options.limits() != self.limits
         {
             return Ok(None);
@@ -214,6 +214,7 @@ impl CompiledWorkbook {
                 limits: self.limits,
                 undeclared_dynamic_arrays: self.undeclared_dynamic_arrays,
                 unstable_formulas: Arc::new(unstable_formulas),
+                graph_follows_values: self.graph_follows_values,
                 volatile_formulas: Arc::new(volatile_formulas),
             },
             parsed_formula_count,

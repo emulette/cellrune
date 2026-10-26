@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::super::error::{compatibility, detail};
 use super::super::xml::XmlBudget;
 use super::super::xstring::decode_xstring;
@@ -5,7 +7,7 @@ use super::super::{XlsxErrorCode, XlsxReadError};
 use super::shared_strings::SharedStrings;
 use crate::calculation::{calendar_date_exists, serial_from_calendar_date};
 use crate::{
-    CellAddress, CellRange, CellValue, DateSystem, DiagnosticCode, EXCEL_MAX_COLUMNS,
+    CellAddress, CellContent, CellRange, CellValue, DateSystem, DiagnosticCode, EXCEL_MAX_COLUMNS,
     EXCEL_MAX_ROWS, ExcelError, SavedResult, SavedResultIssue,
 };
 
@@ -163,6 +165,38 @@ fn parse_shared_string(
     let Some(raw_index) = raw_index else {
         return Ok(None);
     };
+    let (shared_strings, index) = shared_string_index(raw_index, shared_strings, budget)?;
+    let value = shared_strings.get(index).ok_or_else(|| {
+        budget
+            .error(XlsxErrorCode::InvalidCellValue)
+            .with_detail(index.to_string())
+    })?;
+    Ok(Some(CellValue::Text(value.to_owned())))
+}
+
+/// Reads a literal `t="s"` cell as the content every cell naming the same item shares.
+pub(super) fn parse_shared_string_cell(
+    raw_index: Option<&str>,
+    shared_strings: Option<&SharedStrings>,
+    budget: &XmlBudget,
+) -> Result<Option<Arc<CellContent>>, XlsxReadError> {
+    let Some(raw_index) = raw_index else {
+        return Ok(None);
+    };
+    let (shared_strings, index) = shared_string_index(raw_index, shared_strings, budget)?;
+    let cell = shared_strings.cell(index).ok_or_else(|| {
+        budget
+            .error(XlsxErrorCode::InvalidCellValue)
+            .with_detail(index.to_string())
+    })?;
+    Ok(Some(Arc::clone(cell)))
+}
+
+fn shared_string_index<'a>(
+    raw_index: &str,
+    shared_strings: Option<&'a SharedStrings>,
+    budget: &XmlBudget,
+) -> Result<(&'a SharedStrings, usize), XlsxReadError> {
     let shared_strings = shared_strings.ok_or_else(|| {
         budget
             .error(XlsxErrorCode::InvalidSharedStrings)
@@ -173,12 +207,7 @@ fn parse_shared_string(
             .error(XlsxErrorCode::InvalidCellValue)
             .with_cause(error)
     })?;
-    let value = shared_strings.get(index).ok_or_else(|| {
-        budget
-            .error(XlsxErrorCode::InvalidCellValue)
-            .with_detail(index.to_string())
-    })?;
-    Ok(Some(CellValue::Text(value.to_owned())))
+    Ok((shared_strings, index))
 }
 
 fn parse_number(value: &str, budget: &XmlBudget) -> Result<CellValue, XlsxReadError> {

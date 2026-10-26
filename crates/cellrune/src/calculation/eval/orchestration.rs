@@ -76,6 +76,7 @@ impl<'workbook> Engine<'workbook> {
             regex_cache: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
             read_formula_before_calculation: std::cell::Cell::new(false),
+            graph_follows_values: true,
             unavailable_previous_reads: std::cell::RefCell::default(),
         };
         if cancelled() {
@@ -135,6 +136,8 @@ impl<'workbook> Engine<'workbook> {
                 passes += 1;
                 let ordered = stale.is_empty();
                 if passes > 1 && (ordered || passes == MAX_DYNAMIC_REFERENCE_PASSES) {
+                    // The graph is the one collected before this pass.
+                    engine.graph_follows_values = false;
                     break;
                 }
                 let next = if engine.dependency_limit_cells.is_empty()
@@ -239,6 +242,7 @@ impl<'workbook> Engine<'workbook> {
             limits: self.options.limits(),
             undeclared_dynamic_arrays,
             unstable_formulas: Arc::new(unstable_formulas),
+            graph_follows_values: self.graph_follows_values,
             volatile_formulas: Arc::new(volatile_formulas),
         })
     }
@@ -255,6 +259,11 @@ impl<'workbook> Engine<'workbook> {
         Ok(formulas)
     }
 
+    /// Evaluates the formulas of `compiled`, or only those in `dirty`, in its order, and returns
+    /// whether `compiled` no longer holds for the values: a formula read another before it was
+    /// calculated, or a formula whose references depend on values resolves them to other targets
+    /// than `compiled` was built with, so that its order, cycles, blocked and limited formulas,
+    /// and the issues readers inherit may differ from a full calculation.
     pub(in crate::calculation) fn evaluate_compiled(
         workbook: &'workbook WorkbookSnapshot,
         options: CalculationOptions,
@@ -262,22 +271,23 @@ impl<'workbook> Engine<'workbook> {
         previous: Option<&'workbook CalculationSnapshot>,
         dirty: Option<&BTreeSet<CalculationCellId>>,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<Self, ()> {
+    ) -> Result<(Self, bool), ()> {
         let mut engine =
             Self::from_compiled(workbook, options, compiled, previous, dirty, cancelled)?;
         loop {
             let dirty = engine.dirty.clone();
-            if !engine.evaluate_compiled_schedule(compiled, dirty.as_ref(), cancelled) {
-                return Err(());
-            }
+            let read_out_of_order =
+                engine.evaluate_compiled_schedule(compiled, dirty.as_ref(), cancelled)?;
             // A pass that read the kept result of a formula with a capability issue evaluates
             // that formula too, so that its readers read the value a full calculation gives them.
             let Some(mut dirty) = dirty else {
-                return Ok(engine);
+                let stale = read_out_of_order || engine.targets_moved(compiled, cancelled)?;
+                return Ok((engine, stale));
             };
             let reread = engine.capability_issue_reads(&dirty, cancelled)?;
             if reread.is_empty() {
-                return Ok(engine);
+                let stale = read_out_of_order || engine.targets_moved(compiled, cancelled)?;
+                return Ok((engine, stale));
             }
             dirty.extend(reread);
             engine = Self::from_compiled(workbook, options, compiled, previous, None, cancelled)?;
@@ -328,6 +338,7 @@ impl<'workbook> Engine<'workbook> {
             regex_cache: std::cell::RefCell::default(),
             formula_columns: std::cell::OnceCell::new(),
             read_formula_before_calculation: std::cell::Cell::new(false),
+            graph_follows_values: true,
             unavailable_previous_reads: std::cell::RefCell::default(),
         };
         let internal_dirty = match dirty {
@@ -349,12 +360,32 @@ impl<'workbook> Engine<'workbook> {
         Ok(engine)
     }
 
+    /// Whether a formula of `compiled` whose references depend on values, evaluated in this pass,
+    /// resolves them with its values to other targets than `compiled` holds for it.
+    fn targets_moved(
+        &self,
+        compiled: &CompiledWorkbook,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<bool, ()> {
+        for cell in compiled.value_dependent_formulas() {
+            if self.evaluated_cells.contains(cell)
+                && self
+                    .formula_dependency_targets(*cell, cancelled)?
+                    .as_slice()
+                    != compiled.dependency_targets(*cell).unwrap_or_default()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn evaluate_compiled_schedule(
         &mut self,
         compiled: &CompiledWorkbook,
         dirty: Option<&BTreeSet<CellId>>,
         cancelled: &impl Fn() -> bool,
-    ) -> bool {
+    ) -> Result<bool, ()> {
         self.lookup_indexes.get_mut().clear();
         if dirty.is_none() {
             self.results.clear();
@@ -372,16 +403,20 @@ impl<'workbook> Engine<'workbook> {
         } else {
             compiled.schedule().order.clone()
         };
+        let mut read_out_of_order = false;
         for cell in cells {
             if cancelled() {
-                return false;
+                return Err(());
             }
             self.evaluated_cells.insert(cell);
-            if self.evaluate_one(cell, cancelled).is_err() {
-                return false;
-            }
+            self.read_formula_before_calculation.set(false);
+            self.evaluate_one(cell, cancelled)?;
+            read_out_of_order |= self.read_formula_before_calculation.get();
         }
-        !cancelled()
+        if cancelled() {
+            return Err(());
+        }
+        Ok(read_out_of_order)
     }
 
     /// Evaluates the formulas of `scheduled` in its order, or only those in `dirty`, whose

@@ -2235,15 +2235,16 @@ fn a_formula_edit_the_compiled_state_cannot_take_reports_the_full_run() {
             CancellationToken::new(),
         )
         .expect("initial calculation");
-    // The edited formula holds a reference incremental calculation cannot follow, so the job
-    // selected to recompile it in place compiles the workbook again.
+    // The edited formula reads itself besides a reference whose cells depend on values, and
+    // incremental calculation cannot follow such a reference past a cycle, so the job selected
+    // to recompile it in place compiles the workbook again.
     session
         .apply_changes(
             session.workbook().semantic_revision(),
             EditBatch::new([WorkbookChange::set_cell_formula(
                 sheet_id,
                 address("D1"),
-                formula("OFFSET(A1,1,0)"),
+                formula("OFFSET(A1,A1,0)+D1"),
             )]),
         )
         .expect("dynamic formula edit");
@@ -2269,8 +2270,9 @@ fn a_formula_edit_the_compiled_state_cannot_take_reports_the_full_run() {
             CalculationDecisionReason::TopologyChanged,
         )
     );
+    // D1 is in a cycle and gets its error without being evaluated.
     assert_eq!(delta.dirty_count(), 5);
-    assert_eq!(delta.evaluated_count(), 5);
+    assert_eq!(delta.evaluated_count(), 4);
 }
 
 #[test]
@@ -2835,6 +2837,195 @@ fn declared_spill_references_recalculate_incrementally_and_remove_stale_children
 }
 
 #[test]
+fn moving_references_match_a_fresh_full_calculation_after_every_edit() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let cell =
+        |a1: &str, value: f64| WorkbookChange::set_cell_value(sheet_id, address(a1), number(value));
+    let logical = |a1: &str, value: bool| {
+        WorkbookChange::set_cell_value(sheet_id, address(a1), CellValue::Logical(value))
+    };
+    let text = |a1: &str, value: &str| {
+        WorkbookChange::set_cell_formula(sheet_id, address(a1), formula(value))
+    };
+    let edge_limited = CalculationOptions::default().with_limits(
+        CalculationLimits::default()
+            .with_max_dependency_edges(40)
+            .expect("edge limit"),
+    );
+    // Each workbook holds a reference whose cells move with values, then edits move it and edit
+    // the cells it moved to.
+    let cases: Vec<(
+        &str,
+        Vec<WorkbookChange>,
+        Vec<WorkbookChange>,
+        CalculationOptions,
+    )> = vec![
+        (
+            "OFFSET of a base chosen by IF",
+            vec![logical("B1", true), text("C1", "OFFSET(IF(B1,A1,A5),1,0)")],
+            vec![logical("B1", false), cell("A6", 100.0)],
+            CalculationOptions::default(),
+        ),
+        (
+            "OFFSET of an INDEX base",
+            vec![cell("B1", 1.0), text("C1", "OFFSET(INDEX(A1:A10,B1),1,0)")],
+            vec![cell("B1", 10.0), cell("A11", 55.0)],
+            CalculationOptions::default(),
+        ),
+        (
+            "OFFSET of a range ending in INDEX",
+            vec![
+                cell("B1", 1.0),
+                text("C1", "SUM(OFFSET(A1:INDEX(A1:A10,B1),1,0))"),
+            ],
+            vec![cell("B1", 10.0), cell("A11", 1000.0)],
+            CalculationOptions::default(),
+        ),
+        (
+            "OFFSET moving onto a cycle",
+            vec![
+                text("G5", "G6"),
+                text("G6", "G5"),
+                cell("B1", 0.0),
+                text("C1", "IFERROR(OFFSET(G1,B1,0),-1)"),
+                text("D1", "C1+1"),
+            ],
+            vec![cell("B1", 4.0)],
+            CalculationOptions::default(),
+        ),
+        (
+            // The OFFSET finds its position in a second pass, after the graph was collected.
+            "OFFSET positioned by a later pass moving onto a cycle",
+            vec![
+                text("H1", "1+0"),
+                text("Z2", "3+1"),
+                cell("M1", 0.0),
+                text("K1", "IF(M1>0,M1,OFFSET(Z1,H1,0))"),
+                text("G5", "G6"),
+                text("G6", "G5"),
+                text("C1", "IFERROR(OFFSET(G1,K1,0),-1)"),
+                text("D1", "C1+1"),
+            ],
+            vec![cell("M1", 4.0)],
+            CalculationOptions::default(),
+        ),
+        (
+            "OFFSET moving onto an unavailable formula",
+            vec![
+                text("G5", "RAND()"),
+                cell("B1", 0.0),
+                text("C1", "OFFSET(G1,B1,0)"),
+            ],
+            vec![cell("B1", 4.0)],
+            CalculationOptions::default(),
+        ),
+        (
+            "OFFSET growing past the dependency limit",
+            (1..=64)
+                .map(|row| text(&format!("H{row}"), "1"))
+                .chain([cell("B1", 1.0), text("C1", "SUM(OFFSET(H1,0,0,B1,1))")])
+                .collect(),
+            vec![cell("B1", 64.0)],
+            edge_limited,
+        ),
+    ];
+    for (name, setup, edits, options) in cases {
+        let mut session = WorkbookCalculationSession::create();
+        let mut changes = (1..=10)
+            .map(|row| cell(&format!("A{row}"), f64::from(row)))
+            .collect::<Vec<_>>();
+        changes.extend([text("E1", "1+1"), text("E2", "1+2")]);
+        changes.extend(setup);
+        session
+            .apply_changes(0, EditBatch::new(changes))
+            .expect("moving reference workbook");
+        session
+            .recalculate(RecalculationMode::Auto, options, CancellationToken::new())
+            .expect("initial calculation");
+        for edit in edits {
+            session
+                .apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new([edit]),
+                )
+                .expect("edit");
+            session
+                .recalculate(RecalculationMode::Auto, options, CancellationToken::new())
+                .expect("recalculation");
+            let full = calculate_workbook(session.workbook(), options);
+            assert_eq!(
+                session
+                    .calculation()
+                    .expect("installed calculation")
+                    .cells()
+                    .collect::<Vec<_>>(),
+                full.cells().collect::<Vec<_>>(),
+                "{name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_offset_of_constant_positions_recalculates_incrementally_on_request() {
+    let mut session = WorkbookCalculationSession::create();
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut changes = (1..=3)
+        .map(|row| {
+            WorkbookChange::set_cell_value(
+                sheet_id,
+                address(&format!("A{row}")),
+                number(f64::from(row)),
+            )
+        })
+        .collect::<Vec<_>>();
+    changes.extend([
+        WorkbookChange::set_cell_formula(
+            sheet_id,
+            address("B1"),
+            formula("SUM(OFFSET(A1,1,0,2,1))"),
+        ),
+        WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("A1*2")),
+    ]);
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("constant OFFSET workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("A2"),
+                number(10.0),
+            )]),
+        )
+        .expect("edit inside the OFFSET");
+
+    let delta = session
+        .recalculate(
+            RecalculationMode::Incremental,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("an OFFSET whose cells never move is incremental");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.evaluated_count(), 1);
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("B1")))),
+        Some(&CalculationCellResult::Value(number(13.0))),
+    );
+}
+
+#[test]
 fn dynamic_references_hidden_in_defined_names_reject_incremental_recalculation() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
@@ -2843,12 +3034,14 @@ fn dynamic_references_hidden_in_defined_names_reject_incremental_recalculation()
             0,
             EditBatch::new([
                 WorkbookChange::set_cell_value(sheet_id, address("A1"), number(1.0)),
+                WorkbookChange::set_cell_value(sheet_id, address("C1"), number(0.0)),
                 WorkbookChange::set_cell_formula(
                     sheet_id,
                     address("B1"),
                     formula("SUM(DynamicCell)"),
                 ),
-                WorkbookChange::set_defined_name(defined_name("DynamicCell", "OFFSET(A1,0,0)")),
+                WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("1+1")),
+                WorkbookChange::set_defined_name(defined_name("DynamicCell", "OFFSET(A1,C1,0)")),
             ]),
         )
         .expect("dynamic defined name setup");
@@ -2885,9 +3078,9 @@ fn dynamic_references_hidden_in_defined_names_reject_incremental_recalculation()
             CalculationOptions::default(),
             CancellationToken::new(),
         )
-        .expect("auto full calculation");
-    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
-    assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
+        .expect("auto calculation");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.reason(), CalculationDecisionReason::DirtySubset);
     assert_calculations_equal(
         session.calculation().expect("installed dynamic result"),
         &calculate_workbook(session.workbook(), CalculationOptions::default()),
@@ -2895,7 +3088,7 @@ fn dynamic_references_hidden_in_defined_names_reject_incremental_recalculation()
 }
 
 #[test]
-fn dynamic_reference_target_switch_recompiles_and_matches_fresh_full() {
+fn dynamic_reference_target_switches_match_fresh_full() {
     let mut session = WorkbookCalculationSession::create();
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
     session
@@ -2910,6 +3103,7 @@ fn dynamic_reference_target_switch_recompiles_and_matches_fresh_full() {
                 WorkbookChange::set_cell_formula(sheet_id, address("B1"), formula("INDIRECT(A1)")),
                 WorkbookChange::set_cell_value(sheet_id, address("C1"), number(1.0)),
                 WorkbookChange::set_cell_formula(sheet_id, address("D1"), formula("C1+1")),
+                WorkbookChange::set_cell_formula(sheet_id, address("E1"), formula("1+1")),
             ]),
         )
         .expect("dynamic-reference workbook");
@@ -2937,8 +3131,10 @@ fn dynamic_reference_target_switch_recompiles_and_matches_fresh_full() {
             CalculationOptions::default(),
             CancellationToken::new(),
         )
-        .expect("dynamic full fallback");
+        .expect("switched target");
 
+    // The INDIRECT reads another cell than it was compiled with, so the workbook is compiled
+    // again.
     assert_eq!(delta.mode(), CalculationExecutionMode::Full);
     assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
     assert_eq!(
@@ -2949,6 +3145,37 @@ fn dynamic_reference_target_switch_recompiles_and_matches_fresh_full() {
     );
     assert_calculations_equal(
         session.calculation().expect("installed dynamic result"),
+        &calculate_workbook(session.workbook(), CalculationOptions::default()),
+    );
+
+    // The compiled state now follows D1, so an edit of its input stays incremental.
+    session
+        .apply_changes(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet_id,
+                address("C1"),
+                number(5.0),
+            )]),
+        )
+        .expect("edit the new target's input");
+    let delta = session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("edited target");
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.reason(), CalculationDecisionReason::DirtySubset);
+    assert_eq!(
+        session
+            .calculation()
+            .and_then(|snapshot| snapshot.cell(CalculationCellId::new(sheet_id, address("B1")))),
+        Some(&CalculationCellResult::Value(number(6.0))),
+    );
+    assert_calculations_equal(
+        session.calculation().expect("installed incremental result"),
         &calculate_workbook(session.workbook(), CalculationOptions::default()),
     );
 }
@@ -3636,6 +3863,21 @@ fn random_dynamic_edit_sequences_match_a_fresh_full_calculation() {
 }
 
 #[test]
+fn random_moving_reference_edit_sequences_stay_incremental_and_match_a_fresh_full_calculation() {
+    let modes = random_edit_sequences(EditProfile::Moving, 201..=208, false);
+    // Value edits and formula edits both recalculate incrementally past moving references.
+    for mode in [
+        "Incremental/DirtySubset/unparsed",
+        "Incremental/DirtySubset/parsed",
+    ] {
+        assert!(
+            modes.contains_key(mode),
+            "no {mode} recalculation: {modes:?}"
+        );
+    }
+}
+
+#[test]
 fn random_structural_edit_sequences_match_a_fresh_full_calculation() {
     // Batches also insert, delete, or move rows, columns, or ranges, or copy ranges.
     random_edit_sequences(EditProfile::Dynamic, 1..=8, true);
@@ -3650,6 +3892,9 @@ enum EditProfile {
     /// The static formulas, `OFFSET` with constant and cell positions, ranges ending in `INDEX`,
     /// spill references, and `SEQUENCE` with and without a declared spill range.
     Dynamic,
+    /// The dynamic formulas without `SEQUENCE`, whose spill an automatic recalculation can follow
+    /// only by compiling the workbook again.
+    Moving,
 }
 
 /// Edits a 12-by-24 grid on two sheets for each seed, in batches of one to three changes, up to
@@ -3862,8 +4107,8 @@ impl EditGenerator {
             _ => {
                 let (a, b, column) = (random.cell(), random.cell(), random.column());
                 let (top, bottom) = (random.below(12) + 1, random.below(12) + 13);
-                let dynamic = self.profile == EditProfile::Dynamic;
-                if dynamic && random.below(15) == 0 {
+                let dynamic = self.profile != EditProfile::Static;
+                if self.profile == EditProfile::Dynamic && random.below(15) == 0 {
                     let declared = random.below(2) == 0;
                     let range = declared.then(|| {
                         CellRange::new(
@@ -4752,7 +4997,7 @@ fn a_volatile_input_change_without_readers_needs_no_evaluation() {
 }
 
 #[test]
-fn a_volatile_input_change_under_dynamic_references_recalculates_in_full() {
+fn a_volatile_input_change_under_dynamic_references_recalculates_their_readers() {
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
     let mut session = WorkbookCalculationSession::create();
     session
@@ -4764,8 +5009,10 @@ fn a_volatile_input_change_under_dynamic_references_recalculates_in_full() {
                 WorkbookChange::set_cell_formula(
                     sheet_id,
                     address("B1"),
-                    formula("OFFSET(A1,RANDBETWEEN(0,1),0)"),
+                    formula("OFFSET(A1,A3,0)+RANDBETWEEN(0,1)"),
                 ),
+                WorkbookChange::set_cell_value(sheet_id, address("A3"), number(0.0)),
+                WorkbookChange::set_cell_formula(sheet_id, address("C1"), formula("A2*3")),
             ]),
         )
         .expect("dynamic random workbook");
@@ -4783,8 +5030,8 @@ fn a_volatile_input_change_under_dynamic_references_recalculates_in_full() {
             CancellationToken::new(),
         )
         .expect("seed change");
-    assert_eq!(delta.mode(), CalculationExecutionMode::Full);
-    assert_eq!(delta.reason(), CalculationDecisionReason::DynamicTopology);
+    assert_eq!(delta.mode(), CalculationExecutionMode::Incremental);
+    assert_eq!(delta.evaluated_count(), 1);
     assert_calculations_equal(
         session.calculation().expect("installed calculation"),
         &calculate_workbook(
