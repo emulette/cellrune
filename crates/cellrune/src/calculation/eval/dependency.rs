@@ -7,7 +7,7 @@ use super::dependency_areas::AreaNodes;
 use super::{Engine, EvalContext, EvaluationBudget};
 use crate::calculation::ast::{Expr, SheetPrefix, StructuredReference};
 use crate::calculation::functions::descriptor::{DependencyKind, DynamicReferenceKind};
-use crate::calculation::functions::kernel::LegacyFunction;
+use crate::calculation::functions::kernel::{LegacyFunction, LookupFunction};
 use crate::calculation::functions::{
     CallableArity, CallableShadow, DynamicFunction, Evaluator,
     builtin_invocation_arguments_are_reachable, callable_shadow_arguments_are_reachable,
@@ -586,6 +586,17 @@ impl Engine<'_> {
                         Some(Evaluator::Dynamic(DynamicFunction::Let)) => {
                             RangeExtent::ValueDependent
                         }
+                        // `IF` and `CHOOSE` return the reference they select, so the area lies
+                        // inside the areas of the arguments they can select.
+                        Some(
+                            Evaluator::Legacy(LegacyFunction::If)
+                            | Evaluator::Lookup(LookupFunction::Choose),
+                        ) => self.selected_range_extent(
+                            context,
+                            args.get(1..).unwrap_or_default(),
+                            local_names,
+                            visited,
+                        ),
                         _ if matches!(
                             function_dependency_kind(name),
                             Some(DependencyKind::DynamicReference(_))
@@ -630,6 +641,34 @@ impl Engine<'_> {
                 _ => RangeExtent::Invalid,
             }
         })
+    }
+
+    /// The extent of a reference selected from `choices`: bounded by the areas of those that are
+    /// references, since the choice follows cell values. A choice that is not a reference selects
+    /// none.
+    fn selected_range_extent(
+        &self,
+        context: EvalContext<'_>,
+        choices: &[Expr],
+        local_names: &[String],
+        visited: &mut Vec<DefinedLambdaId>,
+    ) -> RangeExtent {
+        let mut areas = Vec::new();
+        for choice in choices {
+            match self.range_extent(context, choice, local_names, visited) {
+                RangeExtent::Fixed(rect) | RangeExtent::Bounded(rect) => {
+                    areas.push(ReferenceArea::Rect(rect));
+                }
+                RangeExtent::ValueDependent => return RangeExtent::ValueDependent,
+                RangeExtent::Invalid => {}
+            }
+        }
+        if areas.is_empty() {
+            return RangeExtent::Invalid;
+        }
+        ReferenceValue::from_areas(areas)
+            .bounding_rect()
+            .map_or(RangeExtent::ValueDependent, RangeExtent::Bounded)
     }
 
     /// Reports whether a formula or an array result lies in `rect`.

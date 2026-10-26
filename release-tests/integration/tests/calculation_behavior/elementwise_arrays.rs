@@ -309,6 +309,49 @@ fn type_is_64_for_an_array_in_an_array_context() {
         results(Entry::Dynamic, "TYPE(SEQUENCE({2,3}))", &[]),
         grid(&[&["calculation.unsupported_expression"]])
     );
+    // A function that reads an array and returns one value is not an array.
+    for formula in [
+        "TYPE(LARGE({3,1,2},1))",
+        "TYPE(INDEX({1,2,3},2))",
+        "TYPE(TYPE({1,2}))",
+    ] {
+        for entry in [Entry::Legacy, Entry::Dynamic] {
+            assert_eq!(results(entry, formula, &[]), grid(&[&["1"]]), "{formula}");
+        }
+    }
+    assert_eq!(
+        results(Entry::Dynamic, "TYPE(INDEX({1,2;3,4},1))", &[]),
+        grid(&[&["64"]])
+    );
+}
+
+#[test]
+fn a_value_selected_from_an_array_takes_the_place_of_a_value() {
+    let cells = [
+        ("B1", number(1.0)),
+        ("B2", number(2.0)),
+        ("B3", number(3.0)),
+        ("B4", number(4.0)),
+    ];
+    for (entry, formula, expected) in [
+        (
+            Entry::Dynamic,
+            "SEQUENCE(LARGE({3,1,2},1))",
+            grid(&[&["1"], &["2"], &["3"]]),
+        ),
+        (
+            Entry::Dynamic,
+            "SEQUENCE(INDEX({2,3},1))",
+            grid(&[&["1"], &["2"]]),
+        ),
+        (
+            Entry::Legacy,
+            "SUM(B1:INDEX(B1:B4,LARGE({1,2,3},1)))",
+            grid(&[&["6"]]),
+        ),
+    ] {
+        assert_eq!(results(entry, formula, &cells), expected, "{formula}");
+    }
 }
 
 #[test]
@@ -470,6 +513,19 @@ fn index_rows_and_columns_take_arrays_of_values() {
         assert_eq!(
             results(Entry::Dynamic, formula, &cells),
             expected,
+            "{formula}"
+        );
+    }
+    // INDEX over an array value selects values in a formula that is not an array formula too.
+    for (formula, expected) in [
+        ("INDEX({10,20,30},2)", "20"),
+        ("INDEX({10,20;30,40},2,2)", "40"),
+        ("INDEX(A1:A3*1,2)", "21"),
+        ("INDEX(SORT({3;1;2}),2)", "2"),
+    ] {
+        assert_eq!(
+            results(Entry::Legacy, formula, &cells),
+            grid(&[&[expected]]),
             "{formula}"
         );
     }
@@ -789,4 +845,33 @@ fn criteria_arrays_far_larger_than_the_range_stay_within_the_array_budget() {
         ),
         grid(&[&["3"]])
     );
+}
+
+#[test]
+fn a_range_argument_given_by_a_call_or_name_stays_a_reference_while_another_argument_expands() {
+    let cells = [
+        ("A1", text("a")),
+        ("A2", text("b")),
+        ("A3", text("a")),
+        ("A4", text("c")),
+        ("B1", number(1.0)),
+        ("B2", number(2.0)),
+        ("B3", number(3.0)),
+        ("B4", number(4.0)),
+    ];
+    for (formula, expected) in [
+        ("SUMPRODUCT(COUNTIF(OFFSET(A1,0,0,4),{\"a\",\"b\"}))", "3"),
+        ("LET(r,A1:A4,SUMPRODUCT(COUNTIF(r,{\"a\",\"b\"})))", "3"),
+        ("LET(r,A1:A4,SUMPRODUCT(1/COUNTIF(r,r)))", "3"),
+        (
+            "SUMPRODUCT(SUMIF(INDIRECT(\"A1:A4\"),{\"a\",\"b\"},B1:B4))",
+            "6",
+        ),
+    ] {
+        assert_eq!(
+            results(Entry::Legacy, formula, &cells),
+            grid(&[&[expected]]),
+            "{formula}"
+        );
+    }
 }

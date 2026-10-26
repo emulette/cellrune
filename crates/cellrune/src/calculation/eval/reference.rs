@@ -454,34 +454,35 @@ impl Engine<'_> {
         ) {
             return None;
         }
-        // A condition or index that holds an array selects element by element, an array of
-        // values rather than one reference.
-        if args
-            .first()
-            .is_some_and(|selector| may_hold_array(self, context, selector))
-        {
+        let Some(selector) = args.first() else {
             return Some(Err(ErrorKind::Value));
-        }
-        let selected = match evaluator {
-            Evaluator::Legacy(LegacyFunction::If) => {
-                let condition = args
-                    .first()
-                    .map(|condition| self.eval_scalar(context, condition));
-                match condition.map(|condition| to_logical(&condition)) {
-                    Some(Ok(true)) => args.get(1),
-                    Some(Ok(false)) => args.get(2),
-                    Some(Err(kind)) => return Some(Err(kind)),
-                    None => None,
-                }
+        };
+        // A condition or index that holds several values selects element by element, an array of
+        // values rather than one reference. A name or range of one cell selects one.
+        let selector = if may_hold_array(self, context, selector) {
+            match self.eval_array(context, selector) {
+                Ok(array) if array.is_scalar() => array
+                    .data
+                    .into_iter()
+                    .next()
+                    .expect("a scalar array holds one value"),
+                Ok(_) => return Some(Err(ErrorKind::Value)),
+                Err(kind) => return Some(Err(kind)),
             }
+        } else {
+            self.eval_scalar(context, selector)
+        };
+        let selected = match evaluator {
+            Evaluator::Legacy(LegacyFunction::If) => match to_logical(&selector) {
+                Ok(true) => args.get(1),
+                Ok(false) => args.get(2),
+                Err(kind) => return Some(Err(kind)),
+            },
             Evaluator::Lookup(LookupFunction::Choose) => {
-                let index = args
-                    .first()
-                    .map(|index| to_number(&self.eval_scalar(context, index), self.numeric_text()));
-                match index {
-                    Some(Ok(index)) if index >= 1.0 => args.get(index.trunc() as usize),
-                    Some(Err(kind)) => return Some(Err(kind)),
-                    _ => None,
+                match to_number(&selector, self.numeric_text()) {
+                    Ok(index) if index >= 1.0 => args.get(index.trunc() as usize),
+                    Ok(_) => None,
+                    Err(kind) => return Some(Err(kind)),
                 }
             }
             _ => return None,

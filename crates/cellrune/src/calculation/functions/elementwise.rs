@@ -16,6 +16,7 @@ use super::super::scope::{ArrayEvaluation, ScalarEvaluation, ScopeEntry, ScopeVa
 use super::super::value::{ErrorKind, Value};
 use super::contract::ArgumentMode;
 use super::descriptor::{self, FunctionDescriptor, FunctionResultKind};
+use super::kernel::{ArrayEvaluator, LegacyArrayFunction};
 use super::{direct_sheet_span_error, evaluate_prepared};
 
 /// Calls `descriptor` element by element over the arrays its value arguments hold. Returns `None`
@@ -50,10 +51,17 @@ pub(super) fn call(
             let arg = &args[index];
             match layout.mode_at(index, args.len()) {
                 Some(ArgumentMode::Scalar) if !is_plain_scalar(arg) => Some((index, Once::Value)),
-                Some(ArgumentMode::Array | ArgumentMode::Reference)
+                Some(mode @ (ArgumentMode::Array | ArgumentMode::Reference))
                     if !is_reference(arg) && may_hold_array(engine, context, arg) =>
                 {
-                    Some((index, Once::Array))
+                    Some((
+                        index,
+                        if mode == ArgumentMode::Reference {
+                            Once::Reference
+                        } else {
+                            Once::Array
+                        },
+                    ))
                 }
                 _ => None,
             }
@@ -103,6 +111,9 @@ pub(super) enum Once {
     Value,
     /// Its array, evaluated as the function reads an array.
     Array,
+    /// The reference it returns, or its array when it returns none, as a function reads an
+    /// argument that takes a reference (`COUNTIF(Data,{"a","b"})` over a defined name).
+    Reference,
 }
 
 /// Which arguments an element-wise call reads per element and which once.
@@ -158,6 +169,13 @@ pub(super) fn lift(
                 Err(kind) if kind.is_engine_issue() => return Err(kind),
                 Err(kind) => ScopeValue::Scalar(ScalarEvaluation::new(Value::Error(kind))),
             },
+            Once::Reference => {
+                let value = engine.eval_scope_value(context, &args[*index]);
+                if let Some(kind) = value.engine_issue() {
+                    return Err(kind);
+                }
+                value
+            }
         };
         fixed.push((*index, value));
     }
@@ -357,7 +375,7 @@ pub(super) fn holds_array_value(context: EvalContext<'_>, expr: &Expr) -> bool {
         Expr::Call { name, args } => {
             descriptor::resolve(name).is_some_and(|descriptor| match descriptor.array_evaluator() {
                 Some(evaluator) if evaluator.reads_value_arrays() => {
-                    args.iter().any(|arg| holds_array_value(context, arg))
+                    returns_array_value(context, evaluator, args)
                 }
                 _ => match descriptor.result_kind() {
                     FunctionResultKind::Array => true,
@@ -370,6 +388,58 @@ pub(super) fn holds_array_value(context: EvalContext<'_>, expr: &Expr) -> bool {
         }
         _ => false,
     })
+}
+
+/// Whether a call to `evaluator`, which reads arrays where the call contract takes values,
+/// certainly returns an array value. `TYPE` answers one number, and an order statistic one value
+/// for each `k` (`LARGE({3,1,2},1)` is one number).
+fn returns_array_value(context: EvalContext<'_>, evaluator: ArrayEvaluator, args: &[Expr]) -> bool {
+    match evaluator {
+        ArrayEvaluator::Type => false,
+        ArrayEvaluator::OrderStatistic(_) => {
+            args.get(1).is_some_and(|k| holds_array_value(context, k))
+        }
+        ArrayEvaluator::Legacy(LegacyArrayFunction::Index) => {
+            index_returns_array_value(context, args)
+        }
+        _ => args.iter().any(|arg| holds_array_value(context, arg)),
+    }
+}
+
+/// Whether `INDEX` certainly returns an array value: an index holds an array, or it takes a whole
+/// row or column of an array source, through an index of 0 or an omitted one, or through a single
+/// index into a source that is not one row or one column (`INDEX({10,20,30},2)` is one number).
+fn index_returns_array_value(context: EvalContext<'_>, args: &[Expr]) -> bool {
+    let Some((source, indexes)) = args.split_first() else {
+        return false;
+    };
+    if indexes
+        .iter()
+        .any(|index| holds_array_value(context, index))
+    {
+        return true;
+    }
+    if !holds_array_value(context, source) {
+        return false;
+    }
+    let whole = |index: &Expr| match index {
+        Expr::Missing => true,
+        Expr::Number(number) => number.value() == 0.0,
+        _ => false,
+    };
+    match indexes {
+        [index] => whole(index) || !is_one_dimensional_constant(source),
+        _ => indexes.iter().any(whole),
+    }
+}
+
+/// Whether `expr` is an array constant of one row or one column.
+fn is_one_dimensional_constant(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner) => is_one_dimensional_constant(inner),
+        Expr::Array(rows) => rows.len() == 1 || rows.iter().all(|row| row.len() == 1),
+        _ => false,
+    }
 }
 
 /// A name no formula can bind, through which an element reaches the kernel.

@@ -378,6 +378,131 @@ fn declared_spill_followers_read_a_failed_anchor_the_same_way_incrementally() {
 }
 
 #[test]
+fn a_range_ending_in_if_or_choose_follows_its_end_after_edits() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let mut changes = (1..=6)
+        .map(|row| {
+            WorkbookChange::set_cell_value(
+                sheet_id,
+                address(&format!("A{row}")),
+                number(f64::from(row)),
+            )
+        })
+        .collect::<Vec<_>>();
+    changes.extend([
+        WorkbookChange::set_cell_value(sheet_id, address("C1"), number(1.0)),
+        WorkbookChange::set_cell_formula(
+            sheet_id,
+            address("D1"),
+            formula("SUM(A1:IF(C1=1,A2,A6))"),
+        ),
+        WorkbookChange::set_cell_formula(
+            sheet_id,
+            address("E1"),
+            formula("SUM(A1:CHOOSE(C1,A2,A6))"),
+        ),
+    ]);
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("IF range workbook");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("initial calculation");
+
+    for (address_text, value, expected) in [("C1", 2.0, 21.0), ("A5", 100.0, 116.0)] {
+        session
+            .apply_changes(
+                session.workbook().semantic_revision(),
+                EditBatch::new([WorkbookChange::set_cell_value(
+                    sheet_id,
+                    address(address_text),
+                    number(value),
+                )]),
+            )
+            .expect("edit");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("recalculation");
+        let calculation = session.calculation().expect("installed calculation");
+        for cell in ["D1", "E1"] {
+            assert_eq!(
+                calculation.cell(CalculationCellId::new(sheet_id, address(cell))),
+                Some(&CalculationCellResult::Value(number(expected))),
+                "{cell} after editing {address_text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn defined_names_keep_their_references_in_selections_and_criteria() {
+    let sheet_id = SheetId::new(1).expect("constant sheet ID");
+    let text = |value: &str| CellValue::Text(value.to_owned());
+    let formulas = [
+        ("H1", "SUMPRODUCT(1/COUNTIF(Data,Data))", number(3.0)),
+        (
+            "H2",
+            "SUMPRODUCT(SUMIF(Data,{\"a\",\"b\"},Vals))",
+            number(6.0),
+        ),
+        // A selected reference passes over the text in G1, whichever way the selector is written.
+        ("H3", "SUM(IF(Flag,G1))", number(0.0)),
+        ("H4", "ISREF(IF(Flag,G1))", CellValue::Logical(true)),
+        ("H5", "SUM(CHOOSE(Two-1,G1))", number(0.0)),
+    ];
+    let mut changes = vec![
+        WorkbookChange::set_cell_value(sheet_id, address("A1"), text("a")),
+        WorkbookChange::set_cell_value(sheet_id, address("A2"), text("b")),
+        WorkbookChange::set_cell_value(sheet_id, address("A3"), text("a")),
+        WorkbookChange::set_cell_value(sheet_id, address("A4"), text("c")),
+        WorkbookChange::set_cell_value(sheet_id, address("C1"), CellValue::Logical(true)),
+        WorkbookChange::set_cell_value(sheet_id, address("G1"), text("1,000")),
+        WorkbookChange::set_defined_name(defined_name("Data", "Sheet1!$A$1:$A$4")),
+        WorkbookChange::set_defined_name(defined_name("Vals", "Sheet1!$B$1:$B$4")),
+        WorkbookChange::set_defined_name(defined_name("Flag", "Sheet1!$C$1")),
+        WorkbookChange::set_defined_name(defined_name("Two", "2")),
+    ];
+    changes.extend((1..=4).map(|row| {
+        WorkbookChange::set_cell_value(
+            sheet_id,
+            address(&format!("B{row}")),
+            number(f64::from(row)),
+        )
+    }));
+    changes.extend(formulas.iter().map(|(cell, text, _)| {
+        WorkbookChange::set_cell_formula(sheet_id, address(cell), formula(text))
+    }));
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("defined name workbook");
+    session
+        .recalculate(
+            RecalculationMode::Full,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("calculation");
+    let calculation = session.calculation().expect("installed calculation");
+    for (cell, text, expected) in formulas {
+        assert_eq!(
+            calculation.cell(CalculationCellId::new(sheet_id, address(cell))),
+            Some(&CalculationCellResult::Value(expected)),
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn a_range_ending_in_index_follows_its_end_after_edits() {
     let sheet_id = SheetId::new(1).expect("constant sheet ID");
     let mut changes = (2..=20)

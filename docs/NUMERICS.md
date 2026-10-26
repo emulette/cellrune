@@ -195,7 +195,10 @@ default:
 
 Under `Ieee754` comparison is exact and rounding uses the binary quotient, so `ROUND(1.005,2)` is
 `1`, `TEXT(1.005,"0.00")` is `1.00`, and `TEXT(2^60,"0")` is `1152921504606846976`, the exact
-decimal of the binary value.
+decimal of the binary value. Formatting rounds that exact decimal, as C `printf`, Python, and
+JavaScript's `toFixed` do, while `ROUND` rounds the binary quotient: `TEXT(0.015,"0.00")` is `0.01`
+because the double nearest `0.015` lies below the half, and `ROUND(0.015,2)` is `0.02` because
+`0.015*100` rounds to the double `1.5`. `FIXED` and `DOLLAR` round with `ROUND` first.
 
 ### Matching: numbers in formulas and numbers joined to text
 

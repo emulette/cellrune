@@ -112,8 +112,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   is `1234567890123450`). A result longer than 255 UTF-16 code units, a positive `DOLLAR` result
   of 255, and a code with more than 127 decimal placeholders in any section are `#VALUE!`. Select
   `ArithmeticSemantics::Ieee754` to round the binary value, now from its exact decimal expansion,
-  so that every digit shows (`TEXT(2^60,"0")` is `1152921504606846976`); the display text always
-  rounds as Excel shows it.
+  so that every digit shows (`TEXT(2^60,"0")` is `1152921504606846976`) and a value stored below a
+  half rounds down (`TEXT(0.015,"0.00")` is `0.01`); the display text always rounds as Excel shows
+  it.
 - `TEXT` formats every code as Excel does; the one-section digit codes 0.1.26 formatted no longer
   keep that release's rules. `TEXT(0,"#")` is empty instead of `0`, `TEXT(1,"0.#")` is `1.`
   instead of `1`, and a negative number that rounds to zero shows no sign (`TEXT(-0.4,"0")` is
@@ -170,8 +171,9 @@ inventories, and measurements belong in the linked documentation rather than in 
 - `IF` and `CHOOSE` return the reference they select, as Excel does: `ISREF(IF(TRUE,A1))` is
   `TRUE`, `ROWS(CHOOSE(2,A1:A2,A1:A5))` is `5`, and `SUM`, `COUNT`, `AND`, and the other aggregates
   pass over text and logical values in it as in any reference, so `SUM(IF(TRUE,A1))` with A1
-  holding the text `5` is `0` instead of `5`. A condition or index that holds an array still
-  selects element by element. `AND` reads every element of an array argument, as `OR` and `XOR`
+  holding the text `5` is `0` instead of `5`. A range may end in `IF` or `CHOOSE`, so
+  `SUM(A1:IF(C1,A2,A6))` adds up to the selected cell instead of returning `#VALUE!`. A condition or
+  index that holds an array still selects element by element. `AND` reads every element of an array argument, as `OR` and `XOR`
   do: `AND({TRUE,FALSE})` is `FALSE` instead of `calculation.unsupported_expression`.
 - Functions from Excel's Analysis ToolPak — `EOMONTH`, `EDATE`, `WORKDAY`, `NETWORKDAYS`,
   `WEEKNUM`, `YEARFRAC`, `QUOTIENT`, `MROUND`, `ISEVEN`, `ISODD`, `RANDBETWEEN`, the base

@@ -169,7 +169,7 @@ fn results_past_255_characters_or_127_decimals_are_rejected() {
 }
 
 #[test]
-fn binary_rounding_rounds_the_scaled_double() {
+fn binary_rounding_rounds_the_exact_binary_value() {
     let binary = FormatContext {
         decimal: false,
         ..CONTEXT
@@ -177,6 +177,11 @@ fn binary_rounding_rounds_the_scaled_double() {
     for (value, format, expected) in [
         (1.005, "0.00", "1.00"),
         (0.285, "0%", "28%"),
+        // 0.015 is 0.01499999…, although `0.015*100` rounds to the double 1.5.
+        (0.015, "0.00", "0.01"),
+        (0.015, "0%", "1%"),
+        // A binary value that is exactly half rounds away from zero.
+        (0.125, "0.00", "0.13"),
         (2_f64.powi(60), "0", "1152921504606846976"),
         (2.5, "0", "3"),
         (-0.001, "0.00", "0.00"),

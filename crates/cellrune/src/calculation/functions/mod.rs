@@ -884,13 +884,36 @@ pub(in crate::calculation) fn function_result_kind(name: &str) -> Option<Functio
 }
 
 /// Whether a call to `name` with `args` returns a reference. `INDEX` whose indexes hold arrays
-/// selects a reference per element, which is read as the values they hold instead.
+/// selects a reference per element, which is read as the values they hold instead, and `INDEX`
+/// over an array value selects values (`INDEX({10,20,30},2)` is `20`).
 pub(super) fn call_returns_reference(context: EvalContext<'_>, name: &str, args: &[Expr]) -> bool {
     descriptor::resolve(name).is_some_and(|descriptor| {
         descriptor.result_kind().returns_reference()
             && !(descriptor.evaluator() == Evaluator::Legacy(kernel::LegacyFunction::Index)
-                && index_arguments_hold_arrays(context, args))
+                && (index_arguments_hold_arrays(context, args)
+                    || args.first().is_some_and(is_value_expression)))
     })
+}
+
+/// Whether `expr` evaluates to a value rather than a reference: a literal, an array constant, an
+/// operator, or a call to a function that returns values.
+fn is_value_expression(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner) => is_value_expression(inner),
+        Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Logical(_)
+        | Expr::Array(_)
+        | Expr::Unary { .. }
+        | Expr::Binary { .. } => true,
+        Expr::Call { name, .. } => descriptor::resolve(name).is_some_and(|descriptor| {
+            matches!(
+                descriptor.result_kind(),
+                FunctionResultKind::Scalar | FunctionResultKind::Array
+            )
+        }),
+        _ => false,
+    }
 }
 
 /// Whether a row, column, or area index of an `INDEX` call certainly holds an array.
