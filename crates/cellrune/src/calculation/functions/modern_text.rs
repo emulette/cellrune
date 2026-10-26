@@ -1,7 +1,6 @@
 use super::super::ast::Expr;
 use super::super::coerce::to_number;
-use super::super::eval::{Engine, EvalContext};
-use super::super::limits::CalculationLimitKind;
+use super::super::eval::{BoundedText, Engine, EvalContext};
 use super::super::runtime::Array;
 use super::super::value::{ErrorKind, Value};
 use super::array_common::{poll_cancellation, validate_array_input};
@@ -64,8 +63,8 @@ fn array_to_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
         },
     };
 
-    let mut output = String::new();
-    if strict && let Err(kind) = push_bounded(engine, &mut output, "{") {
+    let mut output = BoundedText::default();
+    if strict && let Err(kind) = output.push(engine, "{") {
         return Value::Error(kind);
     }
     for row in 0..array.rows {
@@ -79,7 +78,7 @@ fn array_to_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
                 } else {
                     ", "
                 };
-                if let Err(kind) = push_bounded(engine, &mut output, delimiter) {
+                if let Err(kind) = output.push(engine, delimiter) {
                     return Value::Error(kind);
                 }
             }
@@ -87,27 +86,13 @@ fn array_to_text(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -
                 Ok(text) => text,
                 Err(kind) => return Value::Error(kind),
             };
-            if let Err(kind) = push_bounded(engine, &mut output, &text) {
+            if let Err(kind) = output.push(engine, &text) {
                 return Value::Error(kind);
             }
         }
     }
-    if strict && let Err(kind) = push_bounded(engine, &mut output, "}") {
+    if strict && let Err(kind) = output.push(engine, "}") {
         return Value::Error(kind);
     }
-    Value::Text(output)
-}
-
-pub(super) fn push_bounded(
-    engine: &Engine<'_>,
-    output: &mut String,
-    text: &str,
-) -> Result<(), ErrorKind> {
-    let bytes = output
-        .len()
-        .checked_add(text.len())
-        .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes))?;
-    engine.ensure_text_bytes(bytes)?;
-    output.push_str(text);
-    Ok(())
+    Value::Text(output.into_string())
 }

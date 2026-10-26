@@ -26,7 +26,7 @@ fn data_validation_pages_report_every_rule_attribute() {
     assert_eq!(
         serde_json::to_value(&page).expect("serialize"),
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "sheet": "Data",
             "total": 3,
             "offset": 0,
@@ -132,7 +132,7 @@ fn hyperlink_and_comment_pages_report_every_attribute() {
         )
         .expect("serialize"),
         json!({
-            "schema_version": 1, "sheet": "Data", "total": 2, "offset": 0, "next_offset": null,
+            "schema_version": 2, "sheet": "Data", "total": 2, "offset": 0, "next_offset": null,
             "entries": [
                 {
                     "range": "B4", "target": "https://example.com/docs?a=1&b=2", "location": null,
@@ -149,7 +149,7 @@ fn hyperlink_and_comment_pages_report_every_attribute() {
     assert_eq!(
         serde_json::to_value(&comments).expect("serialize"),
         json!({
-            "schema_version": 1, "sheet": "Data", "total": 2, "offset": 1, "next_offset": null,
+            "schema_version": 2, "sheet": "Data", "total": 2, "offset": 1, "next_offset": null,
             "entries": [{"address": "C3", "author": "Bo", "text": "Plain note"}]
         })
     );

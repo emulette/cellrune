@@ -1,7 +1,7 @@
 use super::super::ast::Expr;
 use super::super::coerce::to_number;
 use super::super::eval::{Engine, EvalContext};
-use super::super::value::{ErrorKind, Value};
+use super::super::value::{ErrorKind, Value, text_length};
 use super::kernel::RomanFunction;
 use super::util::required_number;
 
@@ -99,7 +99,7 @@ fn roman(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value 
         Ok(text) => text,
         Err(kind) => return Value::Error(kind),
     };
-    if let Err(kind) = engine.ensure_text_bytes(text.len()) {
+    if let Err(kind) = engine.ensure_text_length(text_length(&text)) {
         return Value::Error(kind);
     }
     if let Err(kind) = engine.charge_function_iterations(context, text.len() as u64) {

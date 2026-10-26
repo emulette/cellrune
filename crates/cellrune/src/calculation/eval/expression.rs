@@ -60,13 +60,13 @@ fn evaluate_binary(
     op: BinaryOp,
     left: &Value,
     right: &Value,
-    max_text_bytes: u64,
+    max_text_length: u64,
     arithmetic: ArithmeticSemantics,
     numeric_text: NumericText,
     place: OperatorPlace,
 ) -> Value {
     let excel_rules = matches!(arithmetic, ArithmeticSemantics::ExcelNearZero);
-    let value = apply_binary(op, left, right, max_text_bytes, excel_rules, numeric_text);
+    let value = apply_binary(op, left, right, max_text_length, excel_rules, numeric_text);
     match (op, place, value) {
         // The operands are read as the operator read them, so text that reads as a number cancels
         // too: `=0.1+0.2-"0.3"` is `0` (Mac Excel 16.114).
@@ -207,7 +207,7 @@ impl Engine<'_> {
                     *op,
                     &self.eval_scalar(context, left),
                     &self.eval_scalar(context, right),
-                    self.options.limits().max_text_bytes(),
+                    self.options.limits().max_text_length(),
                     self.arithmetic_semantics(),
                     self.numeric_text(),
                     OperatorPlace::Root,
@@ -500,7 +500,7 @@ impl Engine<'_> {
                 *op,
                 &self.eval_scalar(context, left),
                 &self.eval_scalar(context, right),
-                self.options.limits().max_text_bytes(),
+                self.options.limits().max_text_length(),
                 self.arithmetic_semantics(),
                 self.numeric_text(),
                 OperatorPlace::Nested,
@@ -773,7 +773,7 @@ impl Engine<'_> {
                     op,
                     element_at(&left.array, row, column),
                     element_at(&right.array, row, column),
-                    self.options.limits().max_text_bytes(),
+                    self.options.limits().max_text_length(),
                     self.arithmetic_semantics(),
                     self.numeric_text(),
                     place,

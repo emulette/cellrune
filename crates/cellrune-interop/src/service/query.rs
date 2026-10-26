@@ -628,7 +628,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(report).expect("DTO serializes"),
             serde_json::json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "result": {
                     "kind": "dynamic_formula",
                     "dynamic_kind": "offset",

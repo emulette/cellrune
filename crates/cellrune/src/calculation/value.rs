@@ -106,3 +106,13 @@ impl fmt::Display for Value {
         }
     }
 }
+
+/// The length of `text` in UTF-16 code units, the unit Excel counts characters in.
+pub(crate) fn text_length(text: &str) -> usize {
+    // ASCII text has one code unit per byte.
+    if text.is_ascii() {
+        text.len()
+    } else {
+        text.encode_utf16().count()
+    }
+}

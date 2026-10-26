@@ -91,7 +91,7 @@ fn roman_numeral_conversion_respects_work_and_text_limits() {
         &workbook_with_formulas(&[(1, 1, "ROMAN(3999,0)")]),
         CalculationOptions::default().with_limits(
             CalculationLimits::default()
-                .with_max_text_bytes(8)
+                .with_max_text_length(8)
                 .expect("positive Roman output limit"),
         ),
     );

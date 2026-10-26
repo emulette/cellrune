@@ -47,7 +47,7 @@ fn frozen_panes_and_phonetics_are_read_from_the_package() {
     assert_eq!(
         serde_json::to_value(&phonetics).expect("serialize"),
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "sheet": "Data",
             "total": 1,
             "offset": 0,

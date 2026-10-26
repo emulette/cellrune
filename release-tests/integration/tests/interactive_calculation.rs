@@ -1713,7 +1713,7 @@ fn clean_runtime_issues_survive_incremental_reuse_and_match_full() {
         )
         .expect("resource-limit formulas");
     let limits = CalculationLimits::default()
-        .with_max_text_bytes(3)
+        .with_max_text_length(3)
         .expect("nonzero text limit");
     let options = CalculationOptions::default().with_limits(limits);
     session
@@ -1729,7 +1729,7 @@ fn clean_runtime_issues_survive_incremental_reuse_and_match_full() {
         panic!("A1 must retain its resource-limit issue");
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
-    assert_eq!(issue.detail(), Some("max_text_bytes"));
+    assert_eq!(issue.detail(), Some("max_text_length"));
 
     session
         .apply_changes(

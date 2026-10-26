@@ -1269,6 +1269,19 @@ impl WorkbookDraft {
             copied_tables,
             grid_histories,
         };
+        // SUBTOTAL skips the rows a filter hides, so a filter, table, or grid edit that changes
+        // them changes how the workbook calculates, even where the cells it reads stay put (a
+        // deleted filter column or a moved filter range).
+        let calculation_metadata_changed = calculation_metadata_changed
+            || (batch.changes().iter().any(|change| {
+                is_table_change(change)
+                    || matches!(
+                        change,
+                        WorkbookChange::SetSheetAutoFilter { .. }
+                            | WorkbookChange::WidenSheetAutoFilter { .. }
+                    )
+                    || grid_change(change).is_ok_and(|edit| edit.is_some())
+            }) && filtered_rows_changed(&self.workbook, &next.workbook));
         // The inverse is built before the batch is installed, so a cancelled build leaves the
         // draft unchanged.
         let inverse = if with_inverse {
@@ -1373,6 +1386,24 @@ fn is_sheet_order_change(change: &WorkbookChange) -> bool {
             | WorkbookChange::ImportSheet { .. }
             | WorkbookChange::MoveSheet { .. }
     )
+}
+
+/// Whether any sheet both workbooks hold hides different rows with a filter; see
+/// [`crate::Sheet::is_row_filtered`].
+fn filtered_rows_changed(before: &WorkbookSnapshot, after: &WorkbookSnapshot) -> bool {
+    let filtered = |sheet: &crate::Sheet| {
+        sheet
+            .hidden_rows()
+            .iter()
+            .copied()
+            .filter(|row| sheet.is_row_filtered(*row))
+            .collect::<Vec<_>>()
+    };
+    after.sheets().iter().any(|sheet| {
+        before
+            .sheet_by_id(sheet.id())
+            .is_some_and(|previous| filtered(previous) != filtered(sheet))
+    })
 }
 
 /// Whether `change` edits a table's name, columns, or range.

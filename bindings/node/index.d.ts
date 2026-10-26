@@ -640,7 +640,7 @@ export interface CalculationLimitOptions {
   readonly maxDependencyEdges?: number;
   readonly maxReferenceAreas?: number;
   readonly maxArrayCells?: number;
-  readonly maxTextBytes?: number;
+  readonly maxTextLength?: number;
   readonly maxFunctionIterations?: number;
   readonly maxLetBindings?: number;
   readonly maxLambdaDepth?: number;
@@ -1183,7 +1183,7 @@ export interface CalculationLimits {
   readonly maxDependencyEdges: number;
   readonly maxReferenceAreas: number;
   readonly maxArrayCells: number;
-  readonly maxTextBytes: number;
+  readonly maxTextLength: number;
   readonly maxFunctionIterations: number;
   readonly maxLetBindings: number;
   readonly maxLambdaDepth: number;

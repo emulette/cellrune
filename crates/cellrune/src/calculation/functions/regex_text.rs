@@ -1,9 +1,8 @@
 use super::super::ast::Expr;
 use super::super::coerce::to_number;
-use super::super::eval::{Engine, EvalContext};
+use super::super::eval::{BoundedText, Engine, EvalContext};
 use super::super::runtime::Array;
-use super::super::value::{ErrorKind, Value};
-use super::modern_text::push_bounded;
+use super::super::value::{ErrorKind, Value, text_length};
 use super::regex_common::{CompiledRegex, RegexCaptureSet};
 use super::util::required_text;
 
@@ -128,7 +127,7 @@ fn array_from_spans(
             Some((start, end)) => subject.get(start..end).ok_or(ErrorKind::Value)?.to_owned(),
             None => String::new(),
         };
-        engine.ensure_text_bytes(text.len())?;
+        engine.ensure_text_length(text_length(&text))?;
         data.push(Value::Text(text));
     }
     Ok(Array { rows, cols, data })
@@ -178,7 +177,7 @@ fn replace_result(
     let subject = required_text(engine, context, &args[0])?;
     let pattern = required_text(engine, context, &args[1])?;
     let replacement = required_text(engine, context, &args[2])?;
-    engine.ensure_text_bytes(replacement.len())?;
+    engine.ensure_text_length(text_length(&replacement))?;
     let occurrence = integer_option(engine, context, args.get(3), 0)?;
     let case_insensitive = case_option(engine, context, args.get(4))?;
     let mut regex = CompiledRegex::compile(engine, context, &pattern, case_insensitive)?;
@@ -187,18 +186,14 @@ fn replace_result(
         .transpose()?;
     let matches = regex.captures(engine, context, &subject, maximum_matches)?;
     let selected = selected_match(occurrence, matches.len());
-    let mut output = String::new();
+    let mut output = BoundedText::default();
     let mut cursor = 0;
     for (index, captures) in matches.iter().enumerate() {
         if selected.is_some_and(|selected| selected != index) {
             continue;
         }
         let (start, end) = captures.span(0).ok_or(ErrorKind::Value)?;
-        push_bounded(
-            engine,
-            &mut output,
-            subject.get(cursor..start).ok_or(ErrorKind::Value)?,
-        )?;
+        output.push(engine, subject.get(cursor..start).ok_or(ErrorKind::Value)?)?;
         expand_replacement(
             engine,
             context,
@@ -210,12 +205,8 @@ fn replace_result(
         )?;
         cursor = end;
     }
-    push_bounded(
-        engine,
-        &mut output,
-        subject.get(cursor..).ok_or(ErrorKind::Value)?,
-    )?;
-    Ok(output)
+    output.push(engine, subject.get(cursor..).ok_or(ErrorKind::Value)?)?;
+    Ok(output.into_string())
 }
 
 fn selected_match(occurrence: i64, count: usize) -> Option<usize> {
@@ -238,7 +229,7 @@ fn selected_match(occurrence: i64, count: usize) -> Option<usize> {
 fn expand_replacement(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    output: &mut String,
+    output: &mut BoundedText,
     replacement: &str,
     subject: &str,
     captures: &RegexCaptureSet,
@@ -253,28 +244,24 @@ fn expand_replacement(
     let mut cursor = 0;
     while let Some(relative) = replacement[cursor..].find('$') {
         let dollar = cursor + relative;
-        push_bounded(engine, output, &replacement[cursor..dollar])?;
+        output.push(engine, &replacement[cursor..dollar])?;
         let tail = replacement.get(dollar + 1..).ok_or(ErrorKind::Value)?;
         let Some(next) = tail.chars().next() else {
             return Err(ErrorKind::Value);
         };
         cursor = dollar + 1 + next.len_utf8();
         match next {
-            '$' => push_bounded(engine, output, "$"),
+            '$' => output.push(engine, "$"),
             '&' => append_capture(engine, output, subject, captures, 0),
             '`' => {
                 let (start, _) = captures.span(0).ok_or(ErrorKind::Value)?;
-                push_bounded(
-                    engine,
-                    output,
-                    subject.get(..start).ok_or(ErrorKind::Value)?,
-                )
+                output.push(engine, subject.get(..start).ok_or(ErrorKind::Value)?)
             }
             '\'' => {
                 let (_, end) = captures.span(0).ok_or(ErrorKind::Value)?;
-                push_bounded(engine, output, subject.get(end..).ok_or(ErrorKind::Value)?)
+                output.push(engine, subject.get(end..).ok_or(ErrorKind::Value)?)
             }
-            '_' => push_bounded(engine, output, subject),
+            '_' => output.push(engine, subject),
             '0'..='9' => {
                 let end = replacement[cursor..]
                     .find(|character: char| !character.is_ascii_digit())
@@ -303,13 +290,13 @@ fn expand_replacement(
             _ => Err(ErrorKind::Value),
         }?;
     }
-    push_bounded(engine, output, &replacement[cursor..])
+    output.push(engine, &replacement[cursor..])
 }
 
 fn append_named_capture(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
-    output: &mut String,
+    output: &mut BoundedText,
     lookup: NamedCaptureLookup<'_>,
     name: &str,
     allow_number: bool,
@@ -336,17 +323,13 @@ fn append_named_capture(
 
 fn append_capture(
     engine: &Engine<'_>,
-    output: &mut String,
+    output: &mut BoundedText,
     subject: &str,
     captures: &RegexCaptureSet,
     index: usize,
 ) -> Result<(), ErrorKind> {
     let (start, end) = captures.span(index).ok_or(ErrorKind::Value)?;
-    push_bounded(
-        engine,
-        output,
-        subject.get(start..end).ok_or(ErrorKind::Value)?,
-    )
+    output.push(engine, subject.get(start..end).ok_or(ErrorKind::Value)?)
 }
 
 fn case_option(

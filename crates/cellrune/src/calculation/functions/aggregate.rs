@@ -277,12 +277,12 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         Ok(number) => number.trunc(),
         Err(kind) => return Value::Error(kind),
     };
-    // 101 to 111 name the same aggregates. Excel also skips hidden rows for them, which SUBTOTAL
-    // does not do yet because it would change results it already returns.
-    let operation = if (1.0..=11.0).contains(&function) {
-        function
+    // 101 to 111 name the same aggregates and also skip rows hidden by hand. Rows a filter hides
+    // are skipped by both, as Microsoft documents.
+    let (operation, skip_hidden_rows) = if (1.0..=11.0).contains(&function) {
+        (function, false)
     } else if (101.0..=111.0).contains(&function) {
-        function - 100.0
+        (function - 100.0, true)
     } else {
         return Value::Error(ErrorKind::Value);
     };
@@ -293,7 +293,14 @@ fn subtotal(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         context,
         &args[1..],
         SheetSpanPolicy::CollectAcrossSheets,
-        &|cell| !engine.parsed_expr(cell).is_some_and(contains_subtotal_call),
+        &|cell| {
+            !engine.parsed_expr(cell).is_some_and(contains_subtotal_call)
+                && !(if skip_hidden_rows {
+                    engine.is_row_hidden(cell)
+                } else {
+                    engine.is_row_filtered(cell)
+                })
+        },
     ) {
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),

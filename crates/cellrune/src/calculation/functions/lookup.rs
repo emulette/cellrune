@@ -7,7 +7,7 @@ use super::super::coerce::{compare, to_logical, to_number};
 use super::super::criteria::CompiledWildcardPattern;
 use super::super::eval::{Engine, EvalContext, RectCells};
 use super::super::runtime::{Array, Rect};
-use super::super::value::{ErrorKind, Value};
+use super::super::value::{ErrorKind, Value, text_length};
 use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 use super::criteria_runtime::CriteriaRuntime;
 use super::descriptor::DynamicReferenceKind;
@@ -165,7 +165,7 @@ fn hyperlink(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Va
         Some(friendly_name) => {
             let value = engine.eval_scalar(context, friendly_name);
             if let Value::Text(text) = &value
-                && let Err(kind) = engine.ensure_text_bytes(text.len())
+                && let Err(kind) = engine.ensure_text_length(text_length(text))
             {
                 return Value::Error(kind);
             }

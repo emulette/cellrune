@@ -1,8 +1,8 @@
 use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_text};
-use super::super::eval::{Engine, EvalContext};
+use super::super::eval::{BoundedText, Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
-use super::super::value::{ErrorKind, Value};
+use super::super::value::{ErrorKind, Value, text_length};
 use super::criteria_runtime::CriteriaRuntime;
 use super::kernel::TextFunction;
 use super::util::{ArgumentCells, collect_argument_values, required_number, required_text};
@@ -24,7 +24,7 @@ pub(super) fn call(
             engine,
             context,
             args,
-            |text| text.chars().count().to_string(),
+            |text| text_length(text).to_string(),
             true,
         ),
         TextFunction::Trim => unary_text(engine, context, args, trim_excel, false),
@@ -108,7 +108,12 @@ fn mid(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         Ok(_) => return Value::Error(ErrorKind::Value),
         Err(kind) => return Value::Error(kind),
     };
-    engine.bounded_text(text.chars().skip(start).take(count).collect())
+    // Excel counts UTF-16 code units, so a start or end inside a surrogate pair splits it; the
+    // half that is left becomes U+FFFD, one code unit as well.
+    let units = text.encode_utf16().collect::<Vec<_>>();
+    let start = start.min(units.len());
+    let end = start.saturating_add(count).min(units.len());
+    engine.bounded_text(String::from_utf16_lossy(&units[start..end]))
 }
 
 fn find(
@@ -128,7 +133,7 @@ fn find(
         Ok(text) => text,
         Err(kind) => return Value::Error(kind),
     };
-    if let Err(kind) = engine.ensure_text_bytes(needle.len().max(haystack.len())) {
+    if let Err(kind) = engine.ensure_text_length(text_length(&needle).max(text_length(&haystack))) {
         return Value::Error(kind);
     }
     let start = match args.get(2) {
@@ -139,10 +144,43 @@ fn find(
         },
         None => 0,
     };
-    match find_from(engine, context, &needle, &haystack, start, case_sensitive) {
-        Ok(index) => Value::Number((index + 1) as f64),
+    // Positions count UTF-16 code units, as Excel counts them.
+    if start > text_length(&haystack) {
+        return Value::Error(ErrorKind::Value);
+    }
+    // Empty text is found at the start, even inside a surrogate pair.
+    if needle.is_empty() {
+        return Value::Number((start + 1) as f64);
+    }
+    match find_from(
+        engine,
+        context,
+        &needle,
+        &haystack,
+        character_at_unit(&haystack, start),
+        case_sensitive,
+    ) {
+        Ok(index) => Value::Number((unit_of_character(&haystack, index) + 1) as f64),
         Err(kind) => Value::Error(kind),
     }
+}
+
+/// The index of the first character of `text` that starts at or after the UTF-16 code unit
+/// `unit`.
+fn character_at_unit(text: &str, unit: usize) -> usize {
+    let mut units = 0;
+    for (index, character) in text.chars().enumerate() {
+        if units >= unit {
+            return index;
+        }
+        units += character.len_utf16();
+    }
+    text.chars().count()
+}
+
+/// The UTF-16 code unit at which the character at `index` of `text` starts.
+fn unit_of_character(text: &str, index: usize) -> usize {
+    text.chars().take(index).map(char::len_utf16).sum()
 }
 
 /// Returns the zero-based character index where `needle` first occurs in `haystack` at or after
@@ -242,12 +280,10 @@ fn substitute(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
     }
     let Some(instance_expr) = args.get(3) else {
         let replacements = text.matches(&old).count();
-        let Some(output_bytes) =
-            replacement_output_bytes(text.len(), old.len(), new.len(), replacements)
-        else {
-            return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes));
+        let Some(output_length) = replacement_output_length(&text, &old, &new, replacements) else {
+            return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextLength));
         };
-        if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
+        if let Err(kind) = engine.ensure_text_length(output_length) {
             return Value::Error(kind);
         }
         return Value::Text(text.replace(&old, &new));
@@ -260,10 +296,10 @@ fn substitute(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
     let Some((start, _)) = text.match_indices(&old).nth(instance - 1) else {
         return engine.bounded_text(text);
     };
-    let Some(output_bytes) = replacement_output_bytes(text.len(), old.len(), new.len(), 1) else {
-        return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes));
+    let Some(output_length) = replacement_output_length(&text, &old, &new, 1) else {
+        return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextLength));
     };
-    if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
+    if let Err(kind) = engine.ensure_text_length(output_length) {
         return Value::Error(kind);
     }
     let mut result = text;
@@ -271,15 +307,17 @@ fn substitute(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
     Value::Text(result)
 }
 
-fn replacement_output_bytes(
-    source_bytes: usize,
-    old_bytes: usize,
-    new_bytes: usize,
+/// The length, in UTF-16 code units, of `source` with `replacements` occurrences of `old` replaced
+/// by `new`.
+fn replacement_output_length(
+    source: &str,
+    old: &str,
+    new: &str,
     replacements: usize,
 ) -> Option<usize> {
-    source_bytes
-        .checked_sub(old_bytes.checked_mul(replacements)?)?
-        .checked_add(new_bytes.checked_mul(replacements)?)
+    text_length(source)
+        .checked_sub(text_length(old).checked_mul(replacements)?)?
+        .checked_add(text_length(new).checked_mul(replacements)?)
 }
 
 fn unary_text(
@@ -364,7 +402,23 @@ fn replace(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Valu
         Ok(text) => text,
         Err(kind) => return Value::Error(kind),
     };
-    replace_characters(engine, text, start, count, &replacement)
+    // Excel counts UTF-16 code units, so a start or end inside a surrogate pair splits it; the
+    // half that is left becomes U+FFFD, one code unit as well (`REPLACE("😀abc",1,1,"x")`
+    // is five units long).
+    let units = text.encode_utf16().collect::<Vec<_>>();
+    if start > units.len() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let end = start.saturating_add(count).min(units.len());
+    let output_length = units.len() - (end - start) + text_length(&replacement);
+    if let Err(kind) = engine.ensure_text_length(output_length) {
+        return Value::Error(kind);
+    }
+    let mut output = Vec::with_capacity(output_length);
+    output.extend_from_slice(&units[..start]);
+    output.extend(replacement.encode_utf16());
+    output.extend_from_slice(&units[end..]);
+    Value::Text(String::from_utf16_lossy(&output))
 }
 
 /// Replaces `count` characters of `text` from the zero-based character index `start`, as
@@ -389,14 +443,10 @@ pub(super) fn replace_characters(
         .char_indices()
         .nth(end)
         .map_or(text.len(), |(index, _)| index);
-    let Some(output_bytes) = text
-        .len()
-        .checked_sub(byte_end - byte_start)
-        .and_then(|bytes| bytes.checked_add(replacement.len()))
-    else {
-        return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes));
-    };
-    if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
+    let output_length = text_length(&text[..byte_start])
+        + text_length(replacement)
+        + text_length(&text[byte_end..]);
+    if let Err(kind) = engine.ensure_text_length(output_length) {
         return Value::Error(kind);
     }
     let mut result = text;
@@ -417,13 +467,13 @@ fn rept(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
         Ok(_) => return Value::Error(ErrorKind::Value),
         Err(kind) => return Value::Error(kind),
     };
-    let Some(output_bytes) = text.len().checked_mul(count) else {
+    let Some(output_length) = text_length(&text).checked_mul(count) else {
         return Value::Error(ErrorKind::Value);
     };
-    if output_bytes > 32_767 {
+    if output_length > 32_767 {
         return Value::Error(ErrorKind::Value);
     }
-    if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
+    if let Err(kind) = engine.ensure_text_length(output_length) {
         return Value::Error(kind);
     }
     Value::Text(text.repeat(count))
@@ -437,22 +487,18 @@ fn concat(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
-    let mut result = String::new();
+    let mut result = BoundedText::default();
     for item in values {
         match to_text(&item.value) {
             Ok(text) => {
-                let Some(output_bytes) = result.len().checked_add(text.len()) else {
-                    return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes));
-                };
-                if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
+                if let Err(kind) = result.push(engine, &text) {
                     return Value::Error(kind);
                 }
-                result.push_str(&text);
             }
             Err(kind) => return Value::Error(kind),
         }
     }
-    Value::Text(result)
+    Value::Text(result.into_string())
 }
 
 fn textjoin(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
@@ -472,7 +518,7 @@ fn textjoin(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
         Ok(values) => values,
         Err(kind) => return Value::Error(kind),
     };
-    let mut result = String::new();
+    let mut result = BoundedText::default();
     let mut parts = 0_u64;
     for item in values {
         match to_text(&item.value) {
@@ -488,23 +534,16 @@ fn textjoin(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Val
                         Err(kind) => return Value::Error(kind),
                     },
                 };
-                let delimiter_bytes = delimiter.len();
-                let Some(output_bytes) = result
-                    .len()
-                    .checked_add(delimiter_bytes)
-                    .and_then(|bytes| bytes.checked_add(text.len()))
-                else {
-                    return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes));
-                };
-                if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
+                if let Err(kind) = result
+                    .push(engine, &delimiter)
+                    .and_then(|()| result.push(engine, &text))
+                {
                     return Value::Error(kind);
                 }
-                result.push_str(&delimiter);
-                result.push_str(&text);
                 parts += 1;
             }
             Err(kind) => return Value::Error(kind),
         }
     }
-    Value::Text(result)
+    Value::Text(result.into_string())
 }

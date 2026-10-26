@@ -39,7 +39,7 @@ fn a_written_rectangle_reads_back_as_rows_in_one_batch() {
     assert_eq!(
         serde_json::to_value(&values).expect("serialize"),
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "sheet": "Sheet1",
             "start": "A1",
             "end": "C3",

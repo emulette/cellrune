@@ -8,7 +8,7 @@ const MAX_FORMULA_NESTING_DEPTH: &str = "max_formula_nesting_depth";
 const MAX_DEPENDENCY_EDGES: &str = "max_dependency_edges";
 const MAX_REFERENCE_AREAS: &str = "max_reference_areas";
 const MAX_ARRAY_CELLS: &str = "max_array_cells";
-const MAX_TEXT_BYTES: &str = "max_text_bytes";
+const MAX_TEXT_LENGTH: &str = "max_text_length";
 const MAX_FUNCTION_ITERATIONS: &str = "max_function_iterations";
 const MAX_LET_BINDINGS: &str = "max_let_bindings";
 const MAX_LAMBDA_DEPTH: &str = "max_lambda_depth";
@@ -26,7 +26,7 @@ pub struct CalculationLimits {
     max_dependency_edges: u64,
     max_reference_areas: u64,
     max_array_cells: u64,
-    max_text_bytes: u64,
+    max_text_length: u64,
     max_function_iterations: u64,
     max_let_bindings: u64,
     max_lambda_depth: u64,
@@ -77,9 +77,10 @@ impl CalculationLimits {
         self.max_array_cells
     }
 
-    /// Returns the maximum UTF-8 byte length of one calculated text value.
-    pub const fn max_text_bytes(self) -> u64 {
-        self.max_text_bytes
+    /// Returns the maximum length of one calculated text value in UTF-16 code units, the unit Excel
+    /// counts characters in (an emoji outside the Basic Multilingual Plane is two).
+    pub const fn max_text_length(self) -> u64 {
+        self.max_text_length
     }
 
     /// Returns the cumulative function-work limit for one formula-cell evaluation.
@@ -190,13 +191,13 @@ impl CalculationLimits {
         Ok(self)
     }
 
-    /// Replaces the calculated text-value byte limit.
+    /// Replaces the calculated text-value length limit, in UTF-16 code units.
     ///
     /// # Errors
     ///
     /// Returns [`CalculationOptionsError::ZeroLimit`] when `value` is zero.
-    pub fn with_max_text_bytes(mut self, value: u64) -> Result<Self, CalculationOptionsError> {
-        self.max_text_bytes = nonzero(MAX_TEXT_BYTES, value)?;
+    pub fn with_max_text_length(mut self, value: u64) -> Result<Self, CalculationOptionsError> {
+        self.max_text_length = nonzero(MAX_TEXT_LENGTH, value)?;
         Ok(self)
     }
 
@@ -257,7 +258,7 @@ impl Default for CalculationLimits {
             max_dependency_edges: 10_000_000,
             max_reference_areas: 8_192,
             max_array_cells: 1_000_000,
-            max_text_bytes: 32_767,
+            max_text_length: 32_767,
             max_function_iterations: 1_000_000,
             max_let_bindings: 126,
             max_lambda_depth: 256,
@@ -313,8 +314,8 @@ pub enum CalculationLimitKind {
     ReferenceAreas,
     /// [`CalculationLimits::max_array_cells`].
     ArrayCells,
-    /// [`CalculationLimits::max_text_bytes`].
-    TextBytes,
+    /// [`CalculationLimits::max_text_length`].
+    TextLength,
     /// [`CalculationLimits::max_function_iterations`].
     FunctionIterations,
     /// [`CalculationLimits::max_let_bindings`].
@@ -337,7 +338,7 @@ impl CalculationLimitKind {
             Self::DependencyEdges => MAX_DEPENDENCY_EDGES,
             Self::ReferenceAreas => MAX_REFERENCE_AREAS,
             Self::ArrayCells => MAX_ARRAY_CELLS,
-            Self::TextBytes => MAX_TEXT_BYTES,
+            Self::TextLength => MAX_TEXT_LENGTH,
             Self::FunctionIterations => MAX_FUNCTION_ITERATIONS,
             Self::LetBindings => MAX_LET_BINDINGS,
             Self::LambdaDepth => MAX_LAMBDA_DEPTH,

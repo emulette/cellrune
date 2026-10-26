@@ -196,7 +196,7 @@ fn v0_1_10_text_and_regex_work_respects_calculation_limits() {
     assert_issue(&delimiter, 1, CalculationIssueCode::ResourceLimitExceeded);
 
     let text_limits = CalculationLimits::default()
-        .with_max_text_bytes(8)
+        .with_max_text_length(8)
         .expect("positive text limit");
     let output = calculate_workbook(
         &workbook_with_formulas(&[(
@@ -910,7 +910,7 @@ fn v0_1_10_grouping_amplification_respects_calculation_limits() {
     );
 
     let text_limits = CalculationLimits::default()
-        .with_max_text_bytes(1)
+        .with_max_text_length(1)
         .expect("positive grouped text limit");
     let text_limited = calculate_workbook(
         &workbook_with_formulas(&[
@@ -1714,7 +1714,7 @@ fn lambda_callable_values_errors_and_reduce_seeding_match_excel_contracts() {
 #[test]
 fn helper_callbacks_preserve_engine_issues_and_cumulative_work_limits() {
     let text_limits = CalculationLimits::default()
-        .with_max_text_bytes(3)
+        .with_max_text_length(3)
         .expect("nonzero text limit");
     let text_limited = calculate_workbook(
         &workbook_with_formulas(&[
@@ -3892,7 +3892,7 @@ fn reference_introspection_and_xmatch_preserve_engine_limits_and_upstream_issues
     );
 
     let text_limits = CalculationLimits::default()
-        .with_max_text_bytes(8)
+        .with_max_text_length(8)
         .expect("nonzero formula-text limit");
     let formula_text = calculate_workbook(
         &workbook_with_formulas(&[
@@ -4087,9 +4087,9 @@ fn calculation_limits_reject_zero_values() {
         })
     );
     assert_eq!(
-        CalculationLimits::default().with_max_text_bytes(0),
+        CalculationLimits::default().with_max_text_length(0),
         Err(CalculationOptionsError::ZeroLimit {
-            name: "max_text_bytes",
+            name: "max_text_length",
         })
     );
     assert_eq!(
@@ -4331,7 +4331,7 @@ fn text_budget_cannot_be_hidden_and_empty_find_is_safe() {
         (1, 2, "FIND(\"\",\"abc\")"),
     ]);
     let limits = CalculationLimits::default()
-        .with_max_text_bytes(3)
+        .with_max_text_length(3)
         .expect("nonzero text limit");
     let calculation =
         calculate_workbook(&workbook, CalculationOptions::default().with_limits(limits));
@@ -4340,8 +4340,8 @@ fn text_budget_cannot_be_hidden_and_empty_find_is_safe() {
         panic!("text budget must withhold the calculated value");
     };
     assert_eq!(issue.code(), CalculationIssueCode::ResourceLimitExceeded);
-    assert_eq!(issue.detail(), Some("max_text_bytes"));
-    assert_eq!(issue.limit(), Some(CalculationLimitKind::TextBytes));
+    assert_eq!(issue.detail(), Some("max_text_length"));
+    assert_eq!(issue.limit(), Some(CalculationLimitKind::TextLength));
     assert_eq!(
         calculation.cell(cell_id(2)),
         Some(&CalculationCellResult::Value(

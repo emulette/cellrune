@@ -148,9 +148,9 @@ pub struct CalculationLimitOptionsDto {
     /// Maximum array cells or reference traversal cells in one evaluation.
     #[serde(default)]
     pub max_array_cells: Option<u64>,
-    /// Maximum UTF-8 bytes in one calculated text value.
+    /// Maximum UTF-16 code units in one calculated text value.
     #[serde(default)]
-    pub max_text_bytes: Option<u64>,
+    pub max_text_length: Option<u64>,
     /// Maximum function iterations in one formula-cell evaluation.
     #[serde(default)]
     pub max_function_iterations: Option<u64>,
@@ -860,8 +860,8 @@ pub struct CalculationLimitsDto {
     pub max_reference_areas: u64,
     /// Maximum array cells or reference traversal cells in one evaluation.
     pub max_array_cells: u64,
-    /// Maximum UTF-8 bytes in one calculated text value.
-    pub max_text_bytes: u64,
+    /// Maximum UTF-16 code units in one calculated text value.
+    pub max_text_length: u64,
     /// Maximum function iterations in one formula-cell evaluation.
     pub max_function_iterations: u64,
     /// Maximum bindings in one `LET` expression.

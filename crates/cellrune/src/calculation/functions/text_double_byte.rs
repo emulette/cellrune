@@ -14,7 +14,7 @@
 
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
-use super::super::value::{ErrorKind, Value};
+use super::super::value::{ErrorKind, Value, text_length};
 use super::kernel::TextFunction;
 use super::text::{find_from, replace_characters};
 use super::util::{required_number, required_text};
@@ -200,7 +200,7 @@ fn find(
     }
     let needle = required_text(engine, context, &args[0])?;
     let haystack = required_text(engine, context, &args[1])?;
-    engine.ensure_text_bytes(needle.len().max(haystack.len()))?;
+    engine.ensure_text_length(text_length(&needle).max(text_length(&haystack)))?;
     let start = match args.get(2) {
         Some(expr) => byte_offset(engine, context, expr)?,
         None => 0,

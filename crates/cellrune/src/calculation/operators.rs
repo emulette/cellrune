@@ -4,7 +4,7 @@ use super::excel_digits::fifteen_significant_digits;
 use super::limits::CalculationLimitKind;
 use super::numeric_text::NumericText;
 use super::runtime::Array;
-use super::value::{ErrorKind, Value};
+use super::value::{ErrorKind, Value, text_length};
 
 const NOT_AVAILABLE: Value = Value::Error(ErrorKind::NA);
 
@@ -27,7 +27,7 @@ pub(super) fn apply_binary(
     op: BinaryOp,
     left: &Value,
     right: &Value,
-    max_text_bytes: u64,
+    max_text_length: u64,
     approximate_comparison: bool,
     numeric_text: NumericText,
 ) -> Value {
@@ -36,9 +36,12 @@ pub(super) fn apply_binary(
             .and_then(|left_text| to_text(right).map(|right_text| (left_text, right_text)))
         {
             Ok((mut left_text, right_text)) => {
+                // The UTF-8 length is never less than the UTF-16 length, which the limit counts.
                 let output_bytes = (left_text.len() as u64).checked_add(right_text.len() as u64);
-                if output_bytes.is_none_or(|bytes| bytes > max_text_bytes) {
-                    Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes))
+                if output_bytes.is_none_or(|bytes| bytes > max_text_length)
+                    && (text_length(&left_text) + text_length(&right_text)) as u64 > max_text_length
+                {
+                    Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextLength))
                 } else {
                     left_text.push_str(&right_text);
                     Value::Text(left_text)

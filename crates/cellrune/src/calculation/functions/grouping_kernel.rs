@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::super::eval::{Engine, EvalContext};
 use super::super::scope::ArrayEvaluation;
-use super::super::value::{ErrorKind, Value};
+use super::super::value::{ErrorKind, Value, text_length};
 use super::array_common::{cell_count, poll_cancellation};
 use super::array_sort::{compare_sort_values, stable_sort_indexes};
 use super::grouping_options::{FieldRelationship, SortCriterion, TotalDepth, TotalPlacement};
@@ -448,7 +448,7 @@ pub(super) fn add_totals(
     } else {
         language.total_label()
     };
-    engine.ensure_text_bytes(grand_label.len())?;
+    engine.ensure_text_length(text_length(grand_label))?;
     let grand_label = Value::Text(grand_label.to_owned());
 
     let mut grand = Some(grand_total(

@@ -48,7 +48,7 @@ class CalculationLimitOptions(TypedDict, total=False):
     max_dependency_edges: int
     max_reference_areas: int
     max_array_cells: int
-    max_text_bytes: int
+    max_text_length: int
     max_function_iterations: int
     max_let_bindings: int
     max_lambda_depth: int
@@ -1281,7 +1281,7 @@ class CalculationLimits(TypedDict):
     max_dependency_edges: int
     max_reference_areas: int
     max_array_cells: int
-    max_text_bytes: int
+    max_text_length: int
     max_function_iterations: int
     max_let_bindings: int
     max_lambda_depth: int

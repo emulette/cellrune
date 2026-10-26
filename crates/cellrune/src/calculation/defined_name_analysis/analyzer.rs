@@ -1541,7 +1541,7 @@ fn parse_limit(kind: CalculationLimitKind) -> DefinedNameAnalysisLimitKind {
         }
         CalculationLimitKind::DependencyEdges
         | CalculationLimitKind::ArrayCells
-        | CalculationLimitKind::TextBytes
+        | CalculationLimitKind::TextLength
         | CalculationLimitKind::LetBindings
         | CalculationLimitKind::LambdaDepth
         | CalculationLimitKind::LambdaInvocations => DefinedNameAnalysisLimitKind::FormulaAstNodes,

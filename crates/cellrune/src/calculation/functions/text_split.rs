@@ -2,7 +2,7 @@ use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_number, to_text};
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
-use super::super::value::{ErrorKind, Value};
+use super::super::value::{ErrorKind, Value, text_length};
 use super::array_common::{poll_cancellation, validate_array_input};
 use super::util::required_text;
 
@@ -40,7 +40,7 @@ pub(super) fn call_array(
         return Err(ErrorKind::Value);
     }
     let text = required_text(engine, context, &args[0])?;
-    engine.ensure_text_bytes(text.len())?;
+    engine.ensure_text_length(text_length(&text))?;
     engine.charge_function_iterations(context, text.len() as u64)?;
 
     let column_delimiters = delimiters(engine, context, args.get(1))?;
@@ -81,7 +81,7 @@ pub(super) fn call_array(
         return Err(kind);
     }
     if let Value::Text(text) = &padding {
-        engine.ensure_text_bytes(text.len())?;
+        engine.ensure_text_length(text_length(text))?;
     }
 
     let rows = split(
@@ -164,7 +164,7 @@ fn delimiters(
             if text.is_empty() {
                 return Err(ErrorKind::Value);
             }
-            engine.ensure_text_bytes(text.len())?;
+            engine.ensure_text_length(text_length(&text))?;
             let preprocessing_work = u64::try_from(text.len())
                 .map_err(|_| ErrorKind::Num)?
                 .checked_mul(2)

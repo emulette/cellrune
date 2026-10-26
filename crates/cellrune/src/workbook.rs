@@ -707,6 +707,25 @@ impl Sheet {
         self.hidden_rows.binary_search(&row).is_ok()
     }
 
+    /// Returns whether a filter hides `row`: it is hidden and lies in the range of the sheet's or
+    /// a table's auto-filter that has a filter condition. Excel counts every hidden row in such a
+    /// range as filtered, whether a filter or a person hid it.
+    pub(crate) fn is_row_filtered(&self, row: Row) -> bool {
+        let in_rows = |range: CellRange| (range.start().row()..=range.end().row()).contains(&row);
+        self.is_row_hidden(row)
+            && (self.auto_filter().is_some_and(|filter| {
+                !filter.filtered_column_ids().is_empty() && in_rows(filter.range())
+            }) || self.tables().iter().any(|table| {
+                table.auto_filter().is_some_and(|filter| {
+                    filter
+                        .filter_columns()
+                        .iter()
+                        .any(|column| column.criteria().is_some())
+                        && in_rows(filter.range())
+                })
+            }))
+    }
+
     /// Returns the sheet's data validation rules in worksheet order: the `dataValidations`
     /// element first, then the Excel 2010 `x14:dataValidations` extension.
     ///

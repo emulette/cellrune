@@ -7,7 +7,7 @@ const {
   requireProtocolString,
 } = require("./validation.js");
 
-const INTEROP_SCHEMA_VERSION = 1;
+const INTEROP_SCHEMA_VERSION = 2;
 const INTEROP_EDIT_SCHEMA_V2 = 2;
 const DYNAMIC_KINDS = new Set(["offset", "indirect", "spill", "mixed"]);
 const EXTERNAL_TARGET_KINDS = new Set([
@@ -703,7 +703,7 @@ function normalizeTransactionOptions(options) {
       maxDependencyEdges: options.limits.max_dependency_edges,
       maxReferenceAreas: options.limits.max_reference_areas,
       maxArrayCells: options.limits.max_array_cells,
-      maxTextBytes: options.limits.max_text_bytes,
+      maxTextLength: options.limits.max_text_length,
       maxFunctionIterations: options.limits.max_function_iterations,
       maxLetBindings: options.limits.max_let_bindings,
       maxLambdaDepth: options.limits.max_lambda_depth,

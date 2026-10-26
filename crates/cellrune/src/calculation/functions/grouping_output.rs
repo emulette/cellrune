@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use super::super::eval::{Engine, EvalContext};
 use super::super::scope::ArrayEvaluation;
-use super::super::value::{ErrorKind, Value, number_to_general_text};
+use super::super::value::{ErrorKind, Value, number_to_general_text, text_length};
 use super::array_common::poll_cancellation;
 use super::grouped::{AggregateCallable, invoke_aggregate};
 use super::grouping_kernel::{
@@ -356,9 +356,20 @@ fn joined_column_field_header(
     let header = if use_existing {
         let mut parts = Vec::with_capacity(fields.array.cols as usize);
         let mut byte_len = 0_usize;
+        let mut units = 0_usize;
         for column in 0..fields.array.cols {
             poll_cancellation(context)?;
             let part = rendered_header_part(fields.array.at(0, column))?;
+            units = units
+                .checked_add(text_length(&part))
+                .and_then(|len| {
+                    if column == 0 {
+                        Some(len)
+                    } else {
+                        len.checked_add(2)
+                    }
+                })
+                .ok_or(ErrorKind::Num)?;
             byte_len = byte_len
                 .checked_add(part.len())
                 .and_then(|len| {
@@ -371,7 +382,7 @@ fn joined_column_field_header(
                 .ok_or(ErrorKind::Num)?;
             parts.push(part);
         }
-        engine.ensure_text_bytes(byte_len)?;
+        engine.ensure_text_length(units)?;
         let mut joined = String::with_capacity(byte_len);
         for (index, part) in parts.into_iter().enumerate() {
             poll_cancellation(context)?;
@@ -384,7 +395,7 @@ fn joined_column_field_header(
     } else {
         "Column Field".to_owned()
     };
-    engine.ensure_text_bytes(header.len())?;
+    engine.ensure_text_length(text_length(&header))?;
     Ok(Value::Text(header))
 }
 
@@ -474,7 +485,7 @@ fn output_header(
         return Ok(source.array.at(0, column).clone());
     }
     let text = format!("{generated_prefix} {}", u64::from(column) + 1);
-    engine.ensure_text_bytes(text.len())?;
+    engine.ensure_text_length(text_length(&text))?;
     Ok(Value::Text(text))
 }
 

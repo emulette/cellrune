@@ -93,7 +93,7 @@ fn uncached_base_uses_requested_options_and_transaction_cumulative_work_limits()
 fn options_mismatch_builds_the_base_and_topology_reports_conservative_impact() {
     let session = calculated_session();
     let alternate_limits = CalculationLimits::default()
-        .with_max_text_bytes(1_024)
+        .with_max_text_length(1_024)
         .expect("non-zero text limit");
     let options_completed = session
         .prepare_transaction(

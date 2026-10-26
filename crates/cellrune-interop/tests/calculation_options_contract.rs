@@ -132,7 +132,7 @@ fn calculation_and_read_limits_cross_the_transport_boundary() {
 
     let zero = CalculationOptionsDto {
         calculation_limits: CalculationLimitOptionsDto {
-            max_text_bytes: Some(0),
+            max_text_length: Some(0),
             ..CalculationLimitOptionsDto::default()
         },
         ..CalculationOptionsDto::default()
@@ -146,7 +146,7 @@ fn calculation_and_read_limits_cross_the_transport_boundary() {
             .details()
             .detail
             .as_deref()
-            .is_some_and(|detail| detail.contains("max_text_bytes"))
+            .is_some_and(|detail| detail.contains("max_text_length"))
     );
 
     let mut source = WorkbookSession::create();

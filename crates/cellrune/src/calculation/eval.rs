@@ -15,7 +15,7 @@ use super::random::{RandomDraws, RandomPath};
 use super::runtime::{CellId, Rect};
 use super::scope::{ScopeEntry, ScopeValue, scope_value};
 use super::syntax::ParsedFormula;
-use super::value::{ErrorKind, Value};
+use super::value::{ErrorKind, Value, text_length};
 use super::{
     CalculationCellId, CalculationCellResult, CalculationIssueCode, CalculationLimits,
     CalculationOptions, CalculationSnapshot,
@@ -1432,6 +1432,15 @@ impl<'workbook> Engine<'workbook> {
             .is_some_and(|(sheet, row)| sheet.is_row_hidden(row))
     }
 
+    /// Whether a filter hides the row of `cell`; see [`crate::Sheet::is_row_filtered`].
+    pub(super) fn is_row_filtered(&self, cell: CellId) -> bool {
+        self.workbook
+            .sheets()
+            .get(cell.0)
+            .zip(crate::Row::new(cell.1).ok())
+            .is_some_and(|(sheet, row)| sheet.is_row_filtered(row))
+    }
+
     pub(super) fn cell_has_formula(&self, cell: CellId) -> bool {
         self.workbook
             .sheets()
@@ -1534,16 +1543,17 @@ impl<'workbook> Engine<'workbook> {
         }
     }
 
-    pub(super) fn ensure_text_bytes(&self, bytes: usize) -> Result<(), ErrorKind> {
-        if bytes as u64 > self.options.limits().max_text_bytes() {
-            Err(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes))
+    /// Checks a text length, in UTF-16 code units, against the calculated text limit.
+    pub(super) fn ensure_text_length(&self, units: usize) -> Result<(), ErrorKind> {
+        if units as u64 > self.options.limits().max_text_length() {
+            Err(ErrorKind::ResourceLimit(CalculationLimitKind::TextLength))
         } else {
             Ok(())
         }
     }
 
     pub(super) fn bounded_text(&self, text: String) -> Value {
-        match self.ensure_text_bytes(text.len()) {
+        match self.ensure_text_length(text_length(&text)) {
             Ok(()) => Value::Text(text),
             Err(kind) => Value::Error(kind),
         }
@@ -2487,5 +2497,31 @@ mod area_bvh_tests {
             4,
             "cancellation occurred after 256 drain items"
         );
+    }
+}
+
+/// Text built from parts under the calculated text limit, which counts its UTF-16 length as it
+/// grows so that each part is counted once.
+#[derive(Debug, Default)]
+pub(super) struct BoundedText {
+    text: String,
+    length: usize,
+}
+
+impl BoundedText {
+    /// Appends `part`, or fails when the text would pass the calculated text limit.
+    pub(super) fn push(&mut self, engine: &Engine<'_>, part: &str) -> Result<(), ErrorKind> {
+        let length = self
+            .length
+            .checked_add(text_length(part))
+            .ok_or(ErrorKind::ResourceLimit(CalculationLimitKind::TextLength))?;
+        engine.ensure_text_length(length)?;
+        self.text.push_str(part);
+        self.length = length;
+        Ok(())
+    }
+
+    pub(super) fn into_string(self) -> String {
+        self.text
     }
 }

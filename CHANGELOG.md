@@ -188,8 +188,35 @@ inventories, and measurements belong in the linked documentation rather than in 
   `TEXTBEFORE` and `TEXTAFTER` with several delimiters are `calculation.unsupported_expression`.
 - The `excel_near_zero` interop value of `arithmetic_semantics`, and
   `ArithmeticSemantics::ExcelNearZero`, keep their names while selecting all of the fifteen-digit
-  rules above: near-zero correction, comparison, and rounding. The interop schema versions are
-  unchanged because no key or value changes form.
+  rules above: near-zero correction, comparison, and rounding; that change alone changes no key
+  or value form.
+- `LEN`, `MID`, `FIND`, `SEARCH`, and `REPLACE` count UTF-16 code units, as Excel does, instead of
+  Unicode scalar values: `LEN("😀")` is `2` instead of `1`, `FIND("글","한😀글")` is `4` instead of
+  `3`, and `MID` and `REPLACE` positions move alike. A position inside a surrogate pair splits it,
+  and the half that is left becomes U+FFFD, since a text value cannot hold half a pair
+  (`REPLACE("😀abc",1,1,"x")` is `x`, U+FFFD, `abc`, five code units as in Excel, where the half
+  stays). `LEFT` and `RIGHT` still keep a pair whole, as Excel does.
+- The calculated text limit counts UTF-16 code units instead of UTF-8 bytes, so text of up to
+  32,767 characters calculates as in Excel whatever its script: `REPT("가",32767)` and the join of
+  two 11,000-character Hangul texts are text instead of `#VALUE!` or
+  `calculation.resource_limit_exceeded`, and `REPT("😀",16384)` is `#VALUE!`. The same limit value
+  admits up to three times as many UTF-8 bytes as before; lower `max_text_length` to keep the old
+  memory bound for non-ASCII text.
+- `SUBTOTAL` skips the rows a filter hides with every function number, as Microsoft documents, and
+  101 to 111 also skip rows hidden by hand: `SUBTOTAL(109,A1:A3)` with row 2 hidden leaves it out,
+  and `SUBTOTAL(9,…)` leaves out the hidden rows inside a sheet or table auto-filter that declares
+  a filter condition. Both counted every row before. Removing a filter keeps its rows hidden, so
+  they then count as hidden by hand, where Excel shows them again.
+- The interop schema version is 2, for the renamed limit below. The Node.js binding checks it; a
+  client that checks the version accepts 2.
+
+### Removed
+
+- `CalculationLimits::max_text_bytes`, `with_max_text_bytes`, `CalculationLimitKind::TextBytes`,
+  and the interop, Python, and Node.js `max_text_bytes`/`maxTextBytes` option and limit keys.
+  Use `max_text_length`, `with_max_text_length`, `CalculationLimitKind::TextLength`, and
+  `max_text_length`/`maxTextLength`, which count UTF-16 code units; a resource-limit issue now
+  names `max_text_length`.
 
 ### Fixed
 

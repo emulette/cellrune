@@ -9,7 +9,7 @@ const { CellRuneError, Workbook, formatDisplayText, functionCatalog } = require(
 
 function assertCatalogContract() {
   const catalog = functionCatalog();
-  assert.equal(catalog.schemaVersion, 1);
+  assert.equal(catalog.schemaVersion, 2);
   assert.equal(catalog.entries.length, 498);
   const entries = new Map(catalog.entries.map((entry) => [entry.name, entry]));
   for (const name of [

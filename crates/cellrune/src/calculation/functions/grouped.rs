@@ -111,7 +111,7 @@ fn percent_values(engine: &Engine<'_>, subset: Value, all: Value) -> Value {
         super::super::ast::BinaryOp::Divide,
         &subset,
         &all,
-        engine.calculation_limits().max_text_bytes(),
+        engine.calculation_limits().max_text_length(),
         super::util::fifteen_digit_rules(engine),
         engine.numeric_text(),
     )

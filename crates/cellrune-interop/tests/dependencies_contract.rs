@@ -48,7 +48,7 @@ fn precedents_and_dependents_need_the_current_calculation() {
         )
         .expect("serialize"),
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "cell": {"sheet_id": 1, "sheet_name": "Sheet1", "address": "B1"},
             "dynamic": false,
             "total": 2,
@@ -79,7 +79,7 @@ fn precedents_and_dependents_need_the_current_calculation() {
         )
         .expect("serialize"),
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "cell": {"sheet_id": 1, "sheet_name": "Sheet1", "address": "B1"},
             "unlisted_dynamic_formulas": 0,
             "total": 2,

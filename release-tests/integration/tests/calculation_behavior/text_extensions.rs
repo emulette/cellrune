@@ -322,3 +322,70 @@ fn assert_error(formula: &str, expected: ExcelError) {
         "{formula}"
     );
 }
+
+#[test]
+fn text_lengths_and_positions_count_utf16_code_units() {
+    let number =
+        |value: f64| CalculationCellResult::Value(CellValue::number(value).expect("finite"));
+    let text = |value: &str| CalculationCellResult::Value(CellValue::Text(value.to_owned()));
+    let error = |value: ExcelError| CalculationCellResult::Value(CellValue::Error(value));
+    for (formula, expected) in [
+        ("LEN(\"😀\")", number(2.0)),
+        ("MID(\"한😀글\",2,2)", text("😀")),
+        ("FIND(\"글\",\"한😀글\")", number(4.0)),
+        ("SEARCH(\"글\",\"한😀글\")", number(4.0)),
+        ("FIND(\"a\",\"😀a\",2)", number(3.0)),
+        ("FIND(\"a\",\"😀a\",4)", error(ExcelError::Value)),
+        // A position inside a surrogate pair splits it, and U+FFFD, one code unit, takes the
+        // place of the half that is left.
+        ("LEN(REPLACE(\"😀abc\",1,1,\"x\"))", number(5.0)),
+        ("REPLACE(\"😀abc\",1,1,\"x\")", text("x\u{FFFD}abc")),
+        ("UNICODE(MID(\"😀\",1,1))", number(65533.0)),
+        // LEFT and RIGHT keep a surrogate pair whole.
+        ("LEFT(\"😀abc\",2)", text("😀a")),
+        ("RIGHT(\"ab😀\",2)", text("b😀")),
+        // The text limit is 32,767 code units.
+        ("LEN(REPT(\"가\",32767))", number(32767.0)),
+        ("REPT(\"가\",32768)", error(ExcelError::Value)),
+        ("REPT(\"😀\",16384)", error(ExcelError::Value)),
+        (
+            "LEN(REPT(\"가\",11000)&REPT(\"가\",11000))",
+            number(22000.0),
+        ),
+        (
+            "LEN(CONCAT(REPT(\"가\",11000),REPT(\"가\",11000)))",
+            number(22000.0),
+        ),
+        (
+            "LEN(TEXTJOIN(\"\",TRUE,REPT(\"가\",11000),REPT(\"가\",11000)))",
+            number(22000.0),
+        ),
+        (
+            "LEN(CONCATENATE(REPT(\"가\",11000),REPT(\"가\",11000)))",
+            number(22000.0),
+        ),
+        (
+            "LEN(SUBSTITUTE(REPT(\"가\",20000),\"가\",\"나\"))",
+            number(20000.0),
+        ),
+        (
+            "LEN(REPLACE(REPT(\"가\",20000),1,1,\"나\"))",
+            number(20000.0),
+        ),
+        (
+            "LEN(_xlfn.REGEXREPLACE(REPT(\"가\",20000),\"가\",\"나\"))",
+            number(20000.0),
+        ),
+    ] {
+        let calculation = calculate_workbook(
+            &workbook_with_formulas(&[(1, 1, formula)]),
+            CalculationOptions::default(),
+        );
+        assert_eq!(calculation.cell(cell_id(1)), Some(&expected), "{formula}");
+    }
+    let calculation = calculate_workbook(
+        &workbook_with_formulas(&[(1, 1, "REPT(\"가\",20000)&REPT(\"가\",20000)")]),
+        CalculationOptions::default(),
+    );
+    assert_issue(&calculation, 1, CalculationIssueCode::ResourceLimitExceeded);
+}

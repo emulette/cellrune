@@ -1,8 +1,7 @@
 use super::super::ast::Expr;
 use super::super::coerce::{to_logical, to_text};
-use super::super::eval::{Engine, EvalContext};
+use super::super::eval::{BoundedText, Engine, EvalContext};
 use super::super::excel_digits::{Rounding, round_to_digits};
-use super::super::limits::CalculationLimitKind;
 use super::super::textfmt::format_number;
 use super::super::value::{ErrorKind, Value};
 use super::kernel::TextAdditionalFunction;
@@ -198,21 +197,17 @@ fn concatenate(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> 
     if args.is_empty() || args.len() > 255 {
         return Value::Error(ErrorKind::Value);
     }
-    let mut result = String::new();
+    let mut result = BoundedText::default();
     for arg in args {
         let text = match required_text(engine, context, arg) {
             Ok(text) => text,
             Err(kind) => return Value::Error(kind),
         };
-        let Some(output_bytes) = result.len().checked_add(text.len()) else {
-            return Value::Error(ErrorKind::ResourceLimit(CalculationLimitKind::TextBytes));
-        };
-        if let Err(kind) = engine.ensure_text_bytes(output_bytes) {
+        if let Err(kind) = result.push(engine, &text) {
             return Value::Error(kind);
         }
-        result.push_str(&text);
     }
-    Value::Text(result)
+    Value::Text(result.into_string())
 }
 
 fn unichar(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {

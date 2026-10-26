@@ -1196,7 +1196,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   use this (with the same `CalculationLimits` you'll pass to
   `calculate_workbook`) to align static parse, name, and dependency budgets.
   Evaluation-only limits such as materialized array cells, calculated text
-  bytes, and data-dependent iterations can still surface during calculation.
+  length, and data-dependent iterations can still surface during calculation.
 - `FormulaCapabilityReport`: `.entries()`, `.formula_count()`,
   `.supported_count()`, `.unsupported_count()`, `.is_supported()`.
 - `FormulaCapabilityEntry`: `.cell()` and `.capability()`.
@@ -1489,7 +1489,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   `REPLACEB`, `ASC`, and `DBCS`, added in 0.1.27, follow the locale profile's
   double-byte rules. Under `Locale::EnUs` a character counts its UTF-16 code
   units, as Excel without a double-byte language does (`LENB("😀")` is 2 and
-  `FINDB("b","😀b")` is 3, while `LEN("😀")` stays 1 until 0.2.0), with the
+  `FINDB("b","😀b")` is 3, as `LEN("😀")` is 2), with the
   argument coercion and `#VALUE!` boundaries of `LEN`, `LEFT`, `RIGHT`, `MID`,
   `FIND`, `SEARCH`, and `REPLACE`, and `ASC` and `DBCS` return the text
   unchanged. Under `Locale::KoKr` (code page 949) ASCII counts one
@@ -1519,6 +1519,19 @@ than guessing a name from a different XLSX crate (`calamine`,
   hidden by hand: options 0, 2, 4, and 6 keep them and the odd options skip
   them, unlike `SUBTOTAL` 1 to 11. Authored formulas are stored as
   `_xlfn.AGGREGATE`.
+- `SUBTOTAL` skips the rows a filter hides with every function number, as
+  Microsoft documents, and 101 to 111 also skip rows hidden by hand. A filter
+  hides a row when the row is in `Sheet::hidden_rows` and inside the range of
+  the sheet's auto-filter or a table's auto-filter that declares a filter
+  condition; Excel 16.111 counts every hidden row there as filtered. An
+  auto-filter without a condition filters nothing, and removing a filter keeps
+  its rows hidden, so they then count as hidden by hand.
+- `LEN`, `MID`, `FIND`, `SEARCH`, and `REPLACE` count UTF-16 code units, as
+  Excel does (`LEN("😀")` is 2, `FIND("글","한😀글")` is 4). A position inside
+  a surrogate pair splits it and the half that is left becomes U+FFFD, one
+  code unit, since a text value cannot hold half a pair
+  (`REPLACE("😀abc",1,1,"x")` is `x`, U+FFFD, `abc`); Excel keeps the half.
+  `LEFT` and `RIGHT` keep a pair whole (`LEFT("😀abc",2)` is `😀a`).
 - The 22 official names added in 0.1.22 are `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK.EXC`, `TRIMMEAN`,
   `STDEVA`, `STDEVPA`, `VARA`, `VARPA`, `STEYX`, `FISHER`, `FISHERINV`, `PROB`,
   `CHISQ.DIST`, `CHISQ.DIST.RT`, `CHIDIST`, `WEIBULL.DIST`, `WEIBULL`,
@@ -1831,7 +1844,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   `docs/NUMERICS.md` records the policies and their oracles.
 - `CalculationLimits::default()` + 12 `.with_max_*(u64) -> Result<Self, CalculationOptionsError>`
   budgets: formula tokens, source bytes, AST nodes, AST nesting depth,
-  dependency edges, reference areas, array cells, calculated text bytes,
+  dependency edges, reference areas, array cells, calculated text length in
+  UTF-16 code units (`max_text_length`, 32,767 as in Excel),
   data-dependent function iterations, LET bindings, active LAMBDA depth, and
   cumulative LAMBDA/MAP invocations. A `ResourceLimitExceeded` issue names the
   exceeded budget through `CalculationIssue::limit() ->

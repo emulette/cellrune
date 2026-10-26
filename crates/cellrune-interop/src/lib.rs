@@ -81,7 +81,7 @@ pub use values::{
 };
 
 /// Version of the serialized interop contract.
-pub const INTEROP_SCHEMA_VERSION: u32 = 1;
+pub const INTEROP_SCHEMA_VERSION: u32 = 2;
 
 /// Version of function usage reports with decimal-string JSON call counts.
 pub const INTEROP_FUNCTION_USAGE_SCHEMA_VERSION: u32 = 2;

@@ -120,9 +120,9 @@ fn calculation_limits(
             .with_max_array_cells(value)
             .map_err(InteropError::invalid_limit)?;
     }
-    if let Some(value) = options.max_text_bytes {
+    if let Some(value) = options.max_text_length {
         limits = limits
-            .with_max_text_bytes(value)
+            .with_max_text_length(value)
             .map_err(InteropError::invalid_limit)?;
     }
     if let Some(value) = options.max_function_iterations {
@@ -837,7 +837,7 @@ pub(crate) fn calculation_options_report(
             max_dependency_edges: limits.max_dependency_edges(),
             max_reference_areas: limits.max_reference_areas(),
             max_array_cells: limits.max_array_cells(),
-            max_text_bytes: limits.max_text_bytes(),
+            max_text_length: limits.max_text_length(),
             max_function_iterations: limits.max_function_iterations(),
             max_let_bindings: limits.max_let_bindings(),
             max_lambda_depth: limits.max_lambda_depth(),

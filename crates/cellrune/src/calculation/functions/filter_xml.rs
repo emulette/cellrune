@@ -17,7 +17,7 @@ mod xpath;
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
 use super::super::runtime::Array;
-use super::super::value::{ErrorKind, Value};
+use super::super::value::{ErrorKind, Value, text_length};
 use super::array_common::poll_cancellation;
 use super::util::required_text;
 use document::{Document, DocumentError};
@@ -87,7 +87,7 @@ pub(super) fn call_array(
         if value.is_empty() || engine.numeric_text().number(&value).is_some() {
             return Err(ErrorKind::Unsupported);
         }
-        engine.ensure_text_bytes(value.len())?;
+        engine.ensure_text_length(text_length(&value))?;
         data.push(Value::Text(value));
     }
     Ok(Array {

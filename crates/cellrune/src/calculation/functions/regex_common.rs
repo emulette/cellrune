@@ -4,7 +4,7 @@ use pcre2::bytes::{CaptureLocations, Regex, RegexBuilder};
 
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
-use super::super::value::ErrorKind;
+use super::super::value::{ErrorKind, text_length};
 use super::array_common::poll_cancellation;
 use super::regex_options::start_options;
 use super::regex_pattern::{analyze_pattern, is_plain_literal};
@@ -99,7 +99,7 @@ impl CompiledRegex {
         case_insensitive: bool,
     ) -> Result<Self, ErrorKind> {
         poll_cancellation(context)?;
-        engine.ensure_text_bytes(pattern.len())?;
+        engine.ensure_text_length(text_length(pattern))?;
 
         let options = start_options(pattern);
         let function_limit = engine.max_function_iterations();
@@ -182,7 +182,7 @@ impl CompiledRegex {
         maximum_matches: Option<usize>,
     ) -> Result<Vec<RegexCaptureSet>, ErrorKind> {
         poll_cancellation(context)?;
-        engine.ensure_text_bytes(subject.len())?;
+        engine.ensure_text_length(text_length(subject))?;
         let subject_bytes = u64::try_from(subject.len()).map_err(|_| ErrorKind::Num)?;
         engine.charge_function_iterations(
             context,

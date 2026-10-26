@@ -58,7 +58,7 @@ fn retained_preview_pages_with_lossless_cursor_and_commits_once() {
         )
         .expect("preview publishes");
 
-    assert_eq!(preview.schema_version, 1);
+    assert_eq!(preview.schema_version, 2);
     assert!(preview.report.base_calculation_reused);
     assert_eq!(
         preview.report.base_revision + 1,

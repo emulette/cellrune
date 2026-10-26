@@ -685,6 +685,117 @@ pub fn generated_hidden_rows_workbook(formulas: &[&str]) -> Vec<u8> {
     )
 }
 
+/// A one-sheet workbook with 1, 2, 4, and 8 in A11:A14 under a worksheet auto-filter over
+/// A10:A14 that declares no filter condition, the same values in A21:A24 of a table `Data` over
+/// A20:A24 whose auto-filter declares one, rows 12 and 22 hidden, and `formulas` in E1 downward.
+pub fn generated_filtered_rows_workbook(formulas: &[&str]) -> Vec<u8> {
+    let mut rows = std::collections::BTreeMap::<u32, String>::new();
+    for (header, first) in [(10, 11), (20, 21)] {
+        rows.entry(header).or_default().push_str(&format!(
+            r#"<c r="A{header}" t="inlineStr"><is><t>Value</t></is></c>"#
+        ));
+        for (offset, value) in [1, 2, 4, 8].into_iter().enumerate() {
+            let row = first + offset as u32;
+            rows.entry(row)
+                .or_default()
+                .push_str(&format!(r#"<c r="A{row}"><v>{value}</v></c>"#));
+        }
+    }
+    for (offset, formula) in formulas.iter().enumerate() {
+        let row = offset as u32 + 1;
+        rows.entry(row)
+            .or_default()
+            .push_str(&format!("<c r=\"E{row}\"><f>{formula}</f></c>"));
+    }
+    let sheet_data = rows
+        .iter()
+        .map(|(row, cells)| {
+            let hidden = if matches!(row, 12 | 22) {
+                r#" hidden="1""#
+            } else {
+                ""
+            };
+            format!(r#"<row r="{row}"{hidden}>{cells}</row>"#)
+        })
+        .collect::<String>();
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>"#;
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+    let workbook_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+    let worksheet = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>{sheet_data}</sheetData><autoFilter ref="A10:A14"/><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>"#
+    );
+    let worksheet_relationships = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+    let table = r#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1" name="Data" displayName="Data" ref="A20:A24" headerRowCount="1">
+  <autoFilter ref="A20:A24"><filterColumn colId="0"><customFilters><customFilter operator="notEqual" val="2"/></customFilters></filterColumn></autoFilter>
+  <tableColumns count="1"><tableColumn id="1" name="Value"/></tableColumns>
+</table>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", workbook_relationships),
+            ("xl/worksheets/sheet1.xml", &worksheet),
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                worksheet_relationships,
+            ),
+            ("xl/tables/table1.xml", table),
+        ],
+        None,
+    )
+}
+
+/// A one-sheet workbook with 5, 50, 7, and 3 in B11:B14 under a worksheet auto-filter over
+/// B10:C14 whose condition is on column C, row 12 hidden, and `formulas` in A1 downward.
+pub fn generated_condition_column_filter_workbook(formulas: &[&str]) -> Vec<u8> {
+    let mut rows = std::collections::BTreeMap::<u32, String>::new();
+    rows.entry(10)
+        .or_default()
+        .push_str(r#"<c r="B10" t="inlineStr"><is><t>v</t></is></c><c r="C10" t="inlineStr"><is><t>k</t></is></c>"#);
+    for (row, value) in [(11, 5), (12, 50), (13, 7), (14, 3)] {
+        rows.entry(row)
+            .or_default()
+            .push_str(&format!(r#"<c r="B{row}"><v>{value}</v></c>"#));
+    }
+    for (offset, formula) in formulas.iter().enumerate() {
+        let row = offset as u32 + 1;
+        rows.entry(row)
+            .or_default()
+            .push_str(&format!("<c r=\"A{row}\"><f>{formula}</f></c>"));
+    }
+    let sheet_data = rows
+        .iter()
+        .map(|(row, cells)| {
+            let hidden = if *row == 12 { r#" hidden="1""# } else { "" };
+            format!(r#"<row r="{row}"{hidden}>{cells}</row>"#)
+        })
+        .collect::<String>();
+    generated_workbook_with_worksheets(
+        1,
+        &format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{sheet_data}</sheetData><autoFilter ref="B10:C14"><filterColumn colId="1"><filters><filter val="x"/></filters></filterColumn></autoFilter></worksheet>"#
+        ),
+    )
+}
+
 /// A one-sheet workbook with the legacy array formula `{=SEQUENCE(2)}` in D1:D2.
 pub fn generated_legacy_array_workbook() -> Vec<u8> {
     generated_workbook_with_worksheets(

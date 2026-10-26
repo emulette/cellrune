@@ -30,7 +30,7 @@ def main() -> None:
     }
     runtime_methods = set(dir(Workbook))
     assert stub_methods <= runtime_methods
-    assert SCHEMA_VERSION == 1
+    assert SCHEMA_VERSION == 2
     assert CellValue is not None
     assert RangePage.__name__ == "RangePage"
 
