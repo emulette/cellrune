@@ -433,9 +433,10 @@ fn direct_sheet_span_error(
                 )
         })
         .any(|(_, arg)| {
-            engine
-                .resolve_reference_value_expr(context.without_reference_work_charge(), arg)
-                .is_ok_and(|reference| reference.has_sheet_span())
+            may_span_sheets(arg)
+                && engine
+                    .resolve_reference_value_expr(context.without_reference_work_charge(), arg)
+                    .is_ok_and(|reference| reference.has_sheet_span())
         });
     if !has_multi_sheet_argument {
         return None;
@@ -446,6 +447,34 @@ fn direct_sheet_span_error(
         SheetSpanPolicy::CollectAcrossSheets => {
             unreachable!("collecting policies returned before argument inspection")
         }
+    })
+}
+
+/// Whether `expr` may resolve to a reference across sheets: it writes a sheet range such as
+/// `Sheet1:Sheet3!A1`, or reads a name or a call that may hold one. Resolving any other argument
+/// only to look for a sheet span would evaluate its conditions and indexes a second time.
+fn may_span_sheets(expr: &Expr) -> bool {
+    crate::calculation::stack::grow(|| match expr {
+        Expr::Ref(reference) => reference
+            .sheet
+            .as_ref()
+            .is_some_and(|prefix| prefix.end_name.is_some()),
+        Expr::Name(_) | Expr::QualifiedName { .. } | Expr::Invoke { .. } => true,
+        Expr::Call { name, args } => {
+            !is_supported_function(name) || args.iter().any(may_span_sheets)
+        }
+        Expr::Range {
+            start: left,
+            end: right,
+        }
+        | Expr::ReferenceUnion { left, right }
+        | Expr::ReferenceIntersection { left, right } => {
+            may_span_sheets(left) || may_span_sheets(right)
+        }
+        Expr::Paren(inner) | Expr::SpillRef(inner) | Expr::ImplicitIntersection(inner) => {
+            may_span_sheets(inner)
+        }
+        _ => false,
     })
 }
 
@@ -893,6 +922,31 @@ pub(super) fn call_returns_reference(context: EvalContext<'_>, name: &str, args:
                 && (index_arguments_hold_arrays(context, args)
                     || args.first().is_some_and(is_value_expression)))
     })
+}
+
+/// Whether a call to `IF` or `CHOOSE` with `args` may return a reference: one of its branches
+/// may. With only value branches the call is a value without evaluating its condition or index.
+pub(in crate::calculation) fn may_select_reference(args: &[Expr]) -> bool {
+    args.iter().skip(1).any(may_be_reference)
+}
+
+fn may_be_reference(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner) => may_be_reference(inner),
+        Expr::ErrorLit(_) | Expr::Missing => false,
+        Expr::Call { name, args }
+            if matches!(
+                function_evaluator(name),
+                Some(
+                    Evaluator::Legacy(kernel::LegacyFunction::If)
+                        | Evaluator::Lookup(kernel::LookupFunction::Choose)
+                )
+            ) =>
+        {
+            may_select_reference(args)
+        }
+        _ => !is_value_expression(expr),
+    }
 }
 
 /// Whether `expr` evaluates to a value rather than a reference: a literal, an array constant, an

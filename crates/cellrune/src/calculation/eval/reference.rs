@@ -11,7 +11,8 @@ use crate::calculation::functions::kernel::{LegacyFunction, LookupFunction};
 use crate::calculation::functions::{
     DynamicFunction, Evaluator, callable_call_scope, evaluator_value_argument_holds_array,
     function_call_shape_is_valid, function_dependency_kind, function_evaluator,
-    index_arguments_hold_arrays, let_reference, may_hold_array, prepare_evaluator_arguments,
+    index_arguments_hold_arrays, let_reference, may_hold_array, may_select_reference,
+    prepare_evaluator_arguments,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::parser::parse_formula_with_limits;
@@ -20,7 +21,7 @@ use crate::calculation::reference_resolution::{
     resolve_reference_span, resolve_structured_reference, structured_table_coordinates,
     union_reference_values,
 };
-use crate::calculation::runtime::{Rect, RectSpan, ReferenceValue};
+use crate::calculation::runtime::{Array, Rect, RectSpan, ReferenceValue};
 use crate::calculation::scope::ScopeValue;
 use crate::calculation::value::ErrorKind;
 use crate::calculation::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
@@ -447,11 +448,43 @@ impl Engine<'_> {
         name: &str,
         args: &'args [Expr],
     ) -> Option<Result<&'args Expr, ErrorKind>> {
+        Some(match self.selection(context, name, args)? {
+            Ok(Selection::Branch(branch)) => Ok(branch),
+            Ok(Selection::Elements(_)) => Err(ErrorKind::Value),
+            Err(kind) => Err(kind),
+        })
+    }
+
+    /// What `expr` selects when it is a call to `IF` or `CHOOSE` that may return a reference, with
+    /// its condition or index evaluated once, and the context its branches evaluate in. `None` for
+    /// other expressions.
+    pub(in crate::calculation) fn argument_selection<'scope, 'args>(
+        &self,
+        context: EvalContext<'scope>,
+        expr: &'args Expr,
+    ) -> Option<(EvalContext<'scope>, Result<Selection<'args>, ErrorKind>)> {
+        let context = context.enter(expr);
+        match expr {
+            Expr::Paren(inner) => self.argument_selection(context, inner),
+            Expr::Call { name, args } => Some((context, self.selection(context, name, args)?)),
+            _ => None,
+        }
+    }
+
+    fn selection<'args>(
+        &self,
+        context: EvalContext<'_>,
+        name: &str,
+        args: &'args [Expr],
+    ) -> Option<Result<Selection<'args>, ErrorKind>> {
         let evaluator = function_evaluator(name)?;
         if !matches!(
             evaluator,
             Evaluator::Legacy(LegacyFunction::If) | Evaluator::Lookup(LookupFunction::Choose)
         ) {
+            return None;
+        }
+        if !may_select_reference(args) {
             return None;
         }
         let Some(selector) = args.first() else {
@@ -466,7 +499,7 @@ impl Engine<'_> {
                     .into_iter()
                     .next()
                     .expect("a scalar array holds one value"),
-                Ok(_) => return Some(Err(ErrorKind::Value)),
+                Ok(array) => return Some(Ok(Selection::Elements(array))),
                 Err(kind) => return Some(Err(kind)),
             }
         } else {
@@ -489,7 +522,7 @@ impl Engine<'_> {
         };
         Some(match selected {
             Some(Expr::Missing) | None => Err(ErrorKind::Value),
-            Some(branch) => Ok(branch),
+            Some(branch) => Ok(Selection::Branch(branch)),
         })
     }
 
@@ -758,4 +791,12 @@ impl Engine<'_> {
         }
         Err(ErrorKind::Value)
     }
+}
+
+/// What a call to `IF` or `CHOOSE` that may return a reference selects.
+pub(in crate::calculation) enum Selection<'args> {
+    /// The branch a condition or index of one value selects.
+    Branch(&'args Expr),
+    /// A condition or index that holds several values, which selects element by element.
+    Elements(Array),
 }

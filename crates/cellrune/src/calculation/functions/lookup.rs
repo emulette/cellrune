@@ -931,6 +931,19 @@ pub(super) fn choose_array(
         Err(kind) if kind.is_engine_issue() => return Err(kind),
         Err(kind) => Array::scalar(Value::Error(kind)),
     };
+    choose_array_over(engine, context, args, index)
+}
+
+/// `CHOOSE` in an array context over its index, already evaluated.
+pub(super) fn choose_array_over(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    index: Array,
+) -> Result<Array, ErrorKind> {
+    if args.len() < 2 {
+        return Err(ErrorKind::Value);
+    }
     let numeric_text = engine.numeric_text();
     super::elementwise::select(engine, context, args, &[index], |elements| match to_number(
         elements[0],

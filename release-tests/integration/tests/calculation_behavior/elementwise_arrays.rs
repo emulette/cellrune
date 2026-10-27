@@ -3,10 +3,10 @@
 //! array), and by implicit intersection where a formula that is not an array formula ends.
 
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationHints, CalculationOptions, CellAddress,
-    CellContent, CellRange, CellValue, DateSystem, FormulaCell, FormulaDialect, FormulaMetadata,
-    FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet, SheetId, SheetName,
-    SheetVisibility, WorkbookSnapshot, WorkbookSource, calculate_workbook,
+    CalculationCellId, CalculationCellResult, CalculationHints, CalculationLimits,
+    CalculationOptions, CellAddress, CellContent, CellRange, CellValue, DateSystem, FormulaCell,
+    FormulaDialect, FormulaMetadata, FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet,
+    SheetId, SheetName, SheetVisibility, WorkbookSnapshot, WorkbookSource, calculate_workbook,
 };
 
 /// How the formula under test is entered in `Z2`.
@@ -814,6 +814,53 @@ fn textjoin_uses_several_delimiters_in_turn() {
             "{formula}"
         );
     }
+}
+
+#[test]
+fn if_and_choose_evaluate_their_condition_or_index_once() {
+    // One LAMBDA call per condition: a second evaluation would pass the limit.
+    let once = CalculationOptions::default().with_limits(
+        CalculationLimits::default()
+            .with_max_lambda_invocations(1)
+            .expect("positive lambda invocation limit"),
+    );
+    let cells = [
+        ("A1", number(1.0)),
+        ("A2", number(2.0)),
+        ("A3", number(3.0)),
+        ("B1", number(10.0)),
+        ("C1", CellValue::Logical(true)),
+    ];
+    for (formula, expected) in [
+        ("ROUND(IF(LAMBDA(x,x)(1)>0,1,2),0)", "1"),
+        ("ROUND(IF(ROUND(IF(LAMBDA(x,x)(1)>0,1,2),0)>0,1,2),0)", "1"),
+        ("LEN(IF(LAMBDA(x,x)(1)>0,\"a\",\"bb\"))", "1"),
+        ("COUNTIF(IF(LAMBDA(x,x)(1)>0,A1:A3,B1),1)", "1"),
+        ("AND(IF(LAMBDA(x,x)(1)>0,C1))", "TRUE"),
+        ("SUM(IF(LAMBDA(x,x)(1)>5,A1,0))", "0"),
+        ("SUM(CHOOSE(LAMBDA(x,x)(1),A1:A3,B1))", "6"),
+    ] {
+        assert_eq!(
+            results_with(Entry::Legacy, formula, &cells, once),
+            grid(&[&[expected]]),
+            "{formula}"
+        );
+    }
+    // A condition that holds an array is evaluated once for all its elements.
+    let three = CalculationOptions::default().with_limits(
+        CalculationLimits::default()
+            .with_max_lambda_invocations(3)
+            .expect("positive lambda invocation limit"),
+    );
+    assert_eq!(
+        results_with(
+            Entry::Cse,
+            "SUM(IF(MAP(A1:A3,LAMBDA(x,x>1)),A1:A3,0))",
+            &cells,
+            three
+        ),
+        grid(&[&["5"]])
+    );
 }
 
 #[test]

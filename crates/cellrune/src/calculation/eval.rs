@@ -42,9 +42,9 @@ use dependency_areas::AreaNodes;
 use formula_columns::FormulaColumns;
 use materialization::{ArrayOwners, ArrayRegion};
 pub(super) use recompile::RecompiledWorkbook;
-pub(in crate::calculation) use reference::RectCells;
 use reference::StoredCell;
 use reference::{ColumnExtents, cell_at};
+pub(in crate::calculation) use reference::{RectCells, Selection};
 
 pub(super) fn clone_set_cancellable<T>(
     source: &BTreeSet<T>,

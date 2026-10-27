@@ -61,6 +61,19 @@ fn if_array(
         return Err(ErrorKind::Value);
     }
     let condition = engine.eval_array(context, &args[0])?;
+    if_array_over(engine, context, args, condition)
+}
+
+/// `IF` in an array context over its condition, already evaluated.
+pub(super) fn if_array_over(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    condition: Array,
+) -> Result<Array, ErrorKind> {
+    if args.len() < 2 || args.len() > 3 {
+        return Err(ErrorKind::Value);
+    }
     let mut needs_true = false;
     let mut needs_false = false;
     for value in &condition.data {
@@ -191,12 +204,6 @@ fn reference_rect(
     engine.resolve_rect_expr(context, expr)
 }
 
-fn multi_cell_rect(engine: &Engine<'_>, context: EvalContext<'_>, expr: &Expr) -> Option<Rect> {
-    reference_rect(engine, context, expr)
-        .ok()
-        .filter(|rect| !rect.is_single_cell())
-}
-
 fn kernel_if(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> Value {
     if args.len() < 2 || args.len() > 3 {
         return Value::Error(ErrorKind::Value);
@@ -230,7 +237,8 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
     let mut all_true = true;
     let mut visited_cells = 0_u64;
     for arg in args {
-        if let Some(rect) = multi_cell_rect(engine, context, arg) {
+        let reference = reference_rect(engine, context, arg).ok();
+        if let Some(rect) = reference.filter(|rect| !rect.is_single_cell()) {
             let rows = engine.operation_row_count([&rect]);
             if rows > 0 {
                 let cells = rows.checked_mul(rect.width());
@@ -272,8 +280,20 @@ fn kernel_and(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) -> V
             }
             continue;
         }
-        let is_reference = reference_rect(engine, context, arg).is_ok();
-        let value = if !is_reference && super::elementwise::may_hold_array(engine, context, arg) {
+        let is_reference = reference.is_some();
+        // A reference is read from its cell rather than evaluated again.
+        let value = if let Some(rect) = reference {
+            let cell = (rect.sheet, rect.row_start, rect.col_start);
+            let mut stored = engine.rect_cells(&rect, rect.row_start);
+            match engine.read_stored_reference_cell(
+                context,
+                cell,
+                stored.at(rect.row_start, rect.col_start),
+            ) {
+                Ok(value) => value,
+                Err(kind) => return Value::Error(kind),
+            }
+        } else if super::elementwise::may_hold_array(engine, context, arg) {
             match engine.eval_array(context, arg) {
                 // An array's elements take part as a range's cells do: `AND({TRUE,FALSE})` is
                 // `FALSE` (Mac Excel 16.114).
