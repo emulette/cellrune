@@ -11,8 +11,8 @@ use cellrune::{
 use libfuzzer_sys::fuzz_target;
 
 const MAX_STEPS: usize = 64;
-/// The second sheet, which reads the first, holds an `OFFSET` of a cell position, and is deleted
-/// and restored.
+/// The second sheet, which reads the first, holds an `OFFSET` of a cell position whose position
+/// edits move, and is deleted and restored.
 const DATA: &str = "Data";
 
 fuzz_target!(|data: &[u8]| {
@@ -25,7 +25,7 @@ fuzz_target!(|data: &[u8]| {
             continue;
         }
         let revision = session.workbook().semantic_revision();
-        let batch = batch_for(operation, step);
+        let batch = batch_for(&session, operation, step);
         let expected_revision = if operation & 0x80 == 0 {
             revision
         } else {
@@ -258,10 +258,20 @@ fn named_cells(
         .collect()
 }
 
-fn batch_for(operation: u8, step: usize) -> EditBatch {
+fn batch_for(session: &WorkbookCalculationSession, operation: u8, step: usize) -> EditBatch {
     let sheet_id = sheet_id();
     let value = number(f64::from(operation) + step as f64);
+    let data = session
+        .workbook()
+        .sheet_by_name(DATA)
+        .map(|sheet| sheet.id());
     let changes = match operation & 0x0f {
+        // Moves the cell `Data!C1`'s `OFFSET` reads among `Data!A1:A3`.
+        3 if data.is_some() => vec![WorkbookChange::set_cell_value(
+            data.expect("presence checked"),
+            address("B1"),
+            number(f64::from(3 + operation % 3)),
+        )],
         0..=3 => vec![WorkbookChange::set_cell_value(
             sheet_id,
             address("A1"),

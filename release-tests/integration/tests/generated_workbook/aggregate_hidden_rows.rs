@@ -360,3 +360,38 @@ fn deleting_the_column_with_the_filter_condition_counts_the_hidden_rows_as_hidde
     assert_eq!(session, full);
     assert_eq!(session, [65.0]);
 }
+
+#[test]
+fn edits_that_move_or_resize_a_filter_recalculate_subtotal_as_a_full_calculation_does() {
+    fn row(value: u32) -> cellrune::Row {
+        cellrune::Row::new(value).expect("valid row")
+    }
+    let sheet_filter =
+        generated_hidden_rows_workbook(&["SUBTOTAL(9,C11:C14)", "SUBTOTAL(109,C11:C14)"]);
+    let table_filter =
+        generated_filtered_rows_workbook(&["SUBTOTAL(9,A21:A24)", "SUBTOTAL(109,A21:A24)"]);
+    let edits: [(&[u8], fn(&cellrune::WorkbookSnapshot) -> WorkbookChange); 4] = [
+        (&sheet_filter, |workbook| {
+            WorkbookChange::insert_rows(workbook.sheets()[0].id(), row(8), 2).expect("insertion")
+        }),
+        (&sheet_filter, |workbook| {
+            WorkbookChange::move_rows(workbook.sheets()[0].id(), row(12), row(12), row(30))
+                .expect("row move")
+        }),
+        (&table_filter, |workbook| {
+            WorkbookChange::resize_table_rows(
+                workbook.sheets()[0].tables()[0].id(),
+                row(21),
+                row(23),
+            )
+            .expect("table resize")
+        }),
+        (&table_filter, |workbook| {
+            WorkbookChange::insert_rows(workbook.sheets()[0].id(), row(22), 1).expect("insertion")
+        }),
+    ];
+    for (index, (bytes, change)) in edits.into_iter().enumerate() {
+        let (session, full) = numbers_after(bytes, 5, 2, change);
+        assert_eq!(session, full, "edit {index}");
+    }
+}

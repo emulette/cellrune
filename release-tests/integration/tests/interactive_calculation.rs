@@ -3878,6 +3878,11 @@ fn random_moving_reference_edit_sequences_stay_incremental_and_match_a_fresh_ful
 }
 
 #[test]
+fn random_moving_reference_structural_edit_sequences_match_a_fresh_full_calculation() {
+    random_edit_sequences(EditProfile::Moving, 301..=308, true);
+}
+
+#[test]
 fn random_structural_edit_sequences_match_a_fresh_full_calculation() {
     // Batches also insert, delete, or move rows, columns, or ranges, or copy ranges.
     random_edit_sequences(EditProfile::Dynamic, 1..=8, true);
@@ -3889,8 +3894,9 @@ enum EditProfile {
     /// References incremental calculation follows, undefined and changing names, unknown
     /// functions, parse failures, and cycles.
     Static,
-    /// The static formulas, `OFFSET` with constant and cell positions, ranges ending in `INDEX`,
-    /// spill references, and `SEQUENCE` with and without a declared spill range.
+    /// The static formulas, `OFFSET` with constant and cell positions, `INDIRECT` of a row a cell
+    /// holds, ranges ending in `INDEX` at constant and cell positions, spill references, and
+    /// `SEQUENCE` with and without a declared spill range.
     Dynamic,
     /// The dynamic formulas without `SEQUENCE`, whose spill an automatic recalculation can follow
     /// only by compiling the workbook again.
@@ -4129,7 +4135,7 @@ impl EditGenerator {
                     )
                     .expect("dynamic formula");
                 }
-                let text = match random.below(if dynamic { 23 } else { 19 }) {
+                let text = match random.below(if dynamic { 25 } else { 19 }) {
                     0 => format!("{a}+{b}"),
                     1 => format!("{a}*2-{b}"),
                     2 => format!("SUM({column}{top}:{column}{bottom})"),
@@ -4155,6 +4161,8 @@ impl EditGenerator {
                     19 => format!("OFFSET({a},{},0)", random.below(3)),
                     20 => format!("SUM(A1:INDEX(A1:A24,{}))", random.below(24) + 1),
                     21 => format!("OFFSET(A1,{b},1)"),
+                    22 => format!("INDIRECT(\"A\"&{b})*2"),
+                    23 => format!("SUM(A1:INDEX(A1:A24,{b}))"),
                     _ => format!("SUM({column}{top}#)"),
                 };
                 return WorkbookChange::set_cell_formula(sheet, target, formula(&text));
