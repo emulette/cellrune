@@ -11,7 +11,7 @@ use super::super::value::{ErrorKind, Value, text_length};
 use super::super::{EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS};
 use super::criteria_runtime::CriteriaRuntime;
 use super::descriptor::DynamicReferenceKind;
-use super::elementwise::Pick;
+use super::elementwise::{Once, Pick};
 use super::lookup_common::VectorView;
 use super::lookup_index::{
     LookupArea, SearchDirection, indexed_approximate_lookup_offset, indexed_lookup_offset,
@@ -335,9 +335,24 @@ pub(super) fn call_xlookup_array(
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
     let lifted = super::elementwise::lifted_positions(engine, context, args, [0, 4, 5].into_iter());
+    // The arrays searched and returned and the other arguments are read once for every element.
+    let once = super::elementwise::read_once(
+        engine,
+        context,
+        args,
+        &lifted,
+        [
+            (1, Once::Reference),
+            (2, Once::Reference),
+            (3, Once::Value),
+            (4, Once::Value),
+            (5, Once::Value),
+        ]
+        .into_iter(),
+    );
     let lifting = super::elementwise::Lifting {
         lifted: &lifted,
-        once: &[],
+        once: &once,
         only_several: true,
     };
     if !lifted.is_empty()

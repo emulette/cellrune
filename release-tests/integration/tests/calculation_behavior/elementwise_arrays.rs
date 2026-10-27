@@ -875,6 +875,53 @@ fn an_argument_that_is_not_lifted_is_read_once_for_every_element() {
     assert_eq!(rounded.len(), 1);
     assert_eq!(rounded[0].len(), 2);
     assert_eq!(rounded[0][0], rounded[0][1]);
+
+    // INDEX and XLOOKUP read their source, the arrays they search and return, and the indexes and
+    // fallback that hold one value once: one LAMBDA call each, and every element from one column.
+    let once = CalculationOptions::default().with_limits(
+        CalculationLimits::default()
+            .with_max_lambda_invocations(1)
+            .expect("positive lambda invocation limit"),
+    );
+    let cells = [
+        ("A1", number(1.0)),
+        ("A2", number(2.0)),
+        ("A3", number(3.0)),
+        ("B1", number(10.0)),
+        ("B2", number(20.0)),
+        ("B3", number(30.0)),
+    ];
+    for (formula, expected) in [
+        ("INDEX(A1:A3,{1,2},LAMBDA(x,x)(1))", ["1", "2"]),
+        (
+            "INDEX(IF(LAMBDA(x,x)(1)>0,B1:B3,A1:A3),{1,2})",
+            ["10", "20"],
+        ),
+        (
+            "XLOOKUP({1,2},A1:A3,IF(LAMBDA(x,x)(1)>0,B1:B3,A1:A3))",
+            ["10", "20"],
+        ),
+        ("XLOOKUP({1,9},A1:A3,B1:B3,LAMBDA(x,x)(5))", ["10", "5"]),
+    ] {
+        assert_eq!(
+            results_with(Entry::Dynamic, formula, &cells, once),
+            grid(&[&expected]),
+            "{formula}"
+        );
+    }
+    for seed in 0..16 {
+        let options = CalculationOptions::default().with_random_seed(seed);
+        for formula in [
+            "INDEX(CHOOSE(RANDBETWEEN(1,2),A1:A3,B1:B3),{1,2,3})",
+            "XLOOKUP({1,2,3},A1:A3,IF(RAND()>0.5,A1:A3,B1:B3))",
+        ] {
+            let selected = results_with(Entry::Dynamic, formula, &cells, options);
+            assert!(
+                selected == grid(&[&["1", "2", "3"]]) || selected == grid(&[&["10", "20", "30"]]),
+                "{formula} with seed {seed}: {selected:?}"
+            );
+        }
+    }
 }
 
 #[test]

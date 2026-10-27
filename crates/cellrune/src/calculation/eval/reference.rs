@@ -536,6 +536,28 @@ impl Engine<'_> {
         let args = prepared.as_ref();
         let context = context.with_arguments(args);
         let reference = self.resolve_reference_value_expr(context, &args[0])?;
+        self.index_rect(context, args, &reference)
+    }
+
+    /// [`Self::resolve_index_rect`] over `reference`, the first argument already resolved.
+    pub(in crate::calculation) fn resolve_index_rect_over(
+        &self,
+        context: EvalContext<'_>,
+        args: &[Expr],
+        reference: &ReferenceValue,
+    ) -> Result<Rect, ErrorKind> {
+        let prepared = prepare_evaluator_arguments(Evaluator::Legacy(LegacyFunction::Index), args)
+            .ok_or(ErrorKind::Value)?;
+        let args = prepared.as_ref();
+        self.index_rect(context.with_arguments(args), args, reference)
+    }
+
+    fn index_rect(
+        &self,
+        context: EvalContext<'_>,
+        args: &[Expr],
+        reference: &ReferenceValue,
+    ) -> Result<Rect, ErrorKind> {
         let area_index = match args.get(3) {
             Some(Expr::Missing) | None => 1.0,
             Some(expr) => to_number(&self.eval_scalar(context, expr), self.numeric_text())?.trunc(),

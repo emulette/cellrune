@@ -45,28 +45,18 @@ pub(super) fn call(
     // The other arguments are read once for every element, as Excel reads them: a random value
     // is the same in each, and a computed argument is not recomputed.
     let layout = descriptor.call_contract().layout();
-    let once = (0..args.len())
-        .filter(|index| !lifted.contains(index))
-        .filter_map(|index| {
-            let arg = &args[index];
-            match layout.mode_at(index, args.len()) {
-                Some(ArgumentMode::Scalar) if !is_plain_scalar(arg) => Some((index, Once::Value)),
-                Some(mode @ (ArgumentMode::Array | ArgumentMode::Reference))
-                    if !is_reference(arg) && may_hold_array(engine, context, arg) =>
-                {
-                    Some((
-                        index,
-                        if mode == ArgumentMode::Reference {
-                            Once::Reference
-                        } else {
-                            Once::Array
-                        },
-                    ))
-                }
-                _ => None,
-            }
-        })
-        .collect::<Vec<_>>();
+    let once = read_once(
+        engine,
+        context,
+        args,
+        &lifted,
+        (0..args.len()).filter_map(|index| match layout.mode_at(index, args.len()) {
+            Some(ArgumentMode::Scalar) => Some((index, Once::Value)),
+            Some(ArgumentMode::Array) => Some((index, Once::Array)),
+            Some(ArgumentMode::Reference) => Some((index, Once::Reference)),
+            _ => None,
+        }),
+    );
     let lifting = Lifting {
         lifted: &lifted,
         once: &once,
@@ -100,6 +90,31 @@ pub(super) fn lifted_positions(
         .filter(|index| {
             args.get(*index)
                 .is_some_and(|arg| may_hold_array(engine, context, arg))
+        })
+        .collect()
+}
+
+/// Which of `reads` an element-wise call reads once: the arguments that are not lifted and that
+/// evaluating per element would compute again, a value that is not a literal or a cell, or an
+/// array or reference that is not written as one.
+pub(super) fn read_once(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    args: &[Expr],
+    lifted: &[usize],
+    reads: impl Iterator<Item = (usize, Once)>,
+) -> Vec<(usize, Once)> {
+    reads
+        .filter(|(index, once)| {
+            args.get(*index).is_some_and(|arg| {
+                !lifted.contains(index)
+                    && match once {
+                        Once::Value => !is_plain_scalar(arg),
+                        Once::Array | Once::Reference => {
+                            !is_reference(arg) && may_hold_array(engine, context, arg)
+                        }
+                    }
+            })
         })
         .collect()
 }

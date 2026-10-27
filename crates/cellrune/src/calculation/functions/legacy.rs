@@ -4,11 +4,12 @@ use super::super::criteria::CompiledCriteria;
 use super::super::eval::{Engine, EvalContext};
 use super::super::limits::CalculationLimitKind;
 use super::super::operators::{broadcast_shape, element_at};
-use super::super::runtime::{Array, Rect};
+use super::super::runtime::{Array, Rect, ReferenceValue};
 use super::super::textfmt::{format_number, format_text};
 use super::super::value::{ErrorKind, Value};
 use super::criteria_index::indexed_matches;
 use super::criteria_runtime::{ConditionalScanBound, CriteriaRuntime};
+use super::elementwise::Once;
 use super::kernel::{LegacyArrayFunction, LegacyFunction};
 use super::lookup_index::{
     LookupArea, SearchDirection, indexed_approximate_match_offset, indexed_match_offset,
@@ -603,10 +604,10 @@ fn kernel_index(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     match index_source(engine, context, args) {
         // A selection of several values takes its first, as a formula that is not an array
         // formula takes an array's.
-        Ok(Some(values)) => select_from_values(engine, context, &values, args)
+        Ok(IndexSource::Values(values)) => select_from_values(engine, context, &values, args)
             .map_or_else(Value::Error, |selected| selected.data[0].clone()),
-        Ok(None) => engine
-            .resolve_index_rect(context, args)
+        Ok(IndexSource::Reference(reference)) => engine
+            .resolve_index_rect_over(context, args, &reference)
             .and_then(|rect| engine.implicit_intersection_rect(context, rect))
             .and_then(|rect| {
                 engine.read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
@@ -616,20 +617,25 @@ fn kernel_index(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr]) ->
     }
 }
 
-/// The values `INDEX` selects from when its first argument is not a reference, such as an array
-/// constant or a computed array; `None` for a reference.
+/// What `INDEX` selects from: the reference its first argument returns, or the values of one that
+/// is not a reference, such as an array constant or a computed array.
+enum IndexSource {
+    Reference(ReferenceValue),
+    Values(Array),
+}
+
 fn index_source(
     engine: &Engine<'_>,
     context: EvalContext<'_>,
     args: &[Expr],
-) -> Result<Option<Array>, ErrorKind> {
+) -> Result<IndexSource, ErrorKind> {
     let Some(source) = args.first() else {
         return Err(ErrorKind::Value);
     };
     match engine.resolve_reference_value_expr(context, source) {
-        Ok(_) => Ok(None),
+        Ok(reference) => Ok(IndexSource::Reference(reference)),
         Err(kind) if kind.is_engine_issue() => Err(kind),
-        Err(_) => engine.eval_array(context, source).map(Some),
+        Err(_) => engine.eval_array(context, source).map(IndexSource::Values),
     }
 }
 
@@ -738,32 +744,44 @@ fn index_array(
     context: EvalContext<'_>,
     args: &[Expr],
 ) -> Result<Array, ErrorKind> {
-    let values = index_source(engine, context, args)?;
+    // The source is resolved once, and the indexes that hold one value are read once.
+    let source = index_source(engine, context, args)?;
     let lifted = super::elementwise::lifted_positions(engine, context, args, 1..args.len());
+    let once = super::elementwise::read_once(
+        engine,
+        context,
+        args,
+        &lifted,
+        (1..args.len()).map(|index| (index, Once::Value)),
+    );
     let lifting = super::elementwise::Lifting {
         lifted: &lifted,
-        once: &[],
+        once: &once,
         only_several: true,
     };
     let selected =
         super::elementwise::lift(engine, context, args, args, &lifting, |context, args, _| {
-            let selected = match &values {
-                Some(values) => select_from_values(engine, context, values, args)
+            let selected = match &source {
+                IndexSource::Values(values) => select_from_values(engine, context, values, args)
                     .map(|selected| selected.data[0].clone()),
-                None => engine.resolve_index_rect(context, args).and_then(|rect| {
-                    engine
-                        .read_reference_cell(context, (rect.sheet, rect.row_start, rect.col_start))
-                }),
+                IndexSource::Reference(reference) => engine
+                    .resolve_index_rect_over(context, args, reference)
+                    .and_then(|rect| {
+                        engine.read_reference_cell(
+                            context,
+                            (rect.sheet, rect.row_start, rect.col_start),
+                        )
+                    }),
             };
             selected.unwrap_or_else(Value::Error)
         })?;
     if let Some(selected) = selected {
         return Ok(selected);
     }
-    match values {
-        Some(values) => select_from_values(engine, context, &values, args),
-        None => {
-            let rect = engine.resolve_index_rect(context, args)?;
+    match source {
+        IndexSource::Values(values) => select_from_values(engine, context, &values, args),
+        IndexSource::Reference(reference) => {
+            let rect = engine.resolve_index_rect_over(context, args, &reference)?;
             engine.array_from_rect(context, &args[0], rect)
         }
     }
