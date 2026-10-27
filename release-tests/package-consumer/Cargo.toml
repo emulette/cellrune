@@ -5,6 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
-cellrune = { version = "=0.1.27", path = "../../target/package/cellrune-0.1.27" }
+cellrune = { version = "=0.2.0", path = "../../target/package/cellrune-0.2.0" }
 
 [workspace]

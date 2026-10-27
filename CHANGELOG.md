@@ -10,6 +10,8 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
 ### Changed
 
 - Under the default `ArithmeticSemantics::ExcelNearZero`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`,
@@ -2035,7 +2037,8 @@ Existing error codes, details, and messages are unchanged.
   user workbook corpus, and native-producer evidence used during development are not distributed
   with 0.1.0 and are not represented as release gates.
 
-[Unreleased]: https://github.com/emulette/cellrune/compare/v0.1.27...HEAD
+[Unreleased]: https://github.com/emulette/cellrune/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/emulette/cellrune/compare/v0.1.27...v0.2.0
 [0.1.27]: https://github.com/emulette/cellrune/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/emulette/cellrune/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/emulette/cellrune/compare/v0.1.24...v0.1.25

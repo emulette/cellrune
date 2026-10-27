@@ -22,7 +22,7 @@ previous `number` field so large defined-name graphs do not lose precision.
 ## Install
 
 ```console
-npm install @cellrune/node@0.1.27
+npm install @cellrune/node@0.2.0
 ```
 
 ## CommonJS
