@@ -360,6 +360,37 @@ pub(super) fn value_argument_holds_array(
     value_arguments(descriptor, args).any(|index| holds_array_value(context, &args[index]))
 }
 
+/// [`value_argument_holds_array`], also counting a defined name whose formula certainly holds an
+/// array value, as `Arr` defined as `{2,3}` does in `SEQUENCE(Arr)`. Names within that formula
+/// are not followed.
+pub(super) fn value_argument_holds_array_value(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    descriptor: FunctionDescriptor,
+    args: &[Expr],
+) -> bool {
+    value_argument_holds_array(context, descriptor, args)
+        || value_arguments(descriptor, args)
+            .any(|index| defined_name_holds_array(engine, context, &args[index]))
+}
+
+fn defined_name_holds_array(engine: &Engine<'_>, context: EvalContext<'_>, expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner) => defined_name_holds_array(engine, context, inner),
+        Expr::Name(name) if context.binding(name).is_none() => engine
+            .resolve_name_expr_with_id_in_context(context, name)
+            .is_some_and(|(id, named)| {
+                holds_array_value(
+                    context
+                        .without_bindings()
+                        .with_defined_name_scope(Some(id.scope())),
+                    named,
+                )
+            }),
+        _ => false,
+    }
+}
+
 /// `#VALUE!` where a function that rejects ranges receives a range of several cells in a value
 /// argument; see `FunctionDescriptor::rejects_ranges`.
 pub(super) fn range_argument_error(

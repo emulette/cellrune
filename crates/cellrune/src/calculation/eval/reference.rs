@@ -635,7 +635,7 @@ impl Engine<'_> {
         let context = context.with_arguments(args);
         // A reference array (`OFFSET(A1,{0;1},0)`) is not modeled; reading the first element
         // would answer for one reference.
-        if evaluator_value_argument_holds_array(context, evaluator, args) {
+        if evaluator_value_argument_holds_array(self, context, evaluator, args) {
             return Err(ErrorKind::Unsupported);
         }
         if dynamic_kind == DynamicReferenceKind::Indirect {

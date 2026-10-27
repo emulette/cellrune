@@ -506,7 +506,7 @@ pub(super) fn call_function_array(
         return elementwise::call(engine, context, descriptor, args, written);
     };
     if !evaluator.reads_value_arrays()
-        && elementwise::value_argument_holds_array(context, descriptor, args)
+        && elementwise::value_argument_holds_array_value(engine, context, descriptor, args)
     {
         return Some(Err(ErrorKind::Unsupported));
     }
@@ -876,8 +876,9 @@ pub(in crate::calculation) fn prepare_evaluator_arguments<'formula>(
 }
 
 /// Whether a value argument of the function `evaluator` calls certainly holds an array value; see
-/// [`elementwise::value_argument_holds_array`].
+/// [`elementwise::value_argument_holds_array_value`].
 pub(in crate::calculation) fn evaluator_value_argument_holds_array(
+    engine: &Engine<'_>,
     context: EvalContext<'_>,
     evaluator: Evaluator,
     args: &[Expr],
@@ -887,7 +888,7 @@ pub(in crate::calculation) fn evaluator_value_argument_holds_array(
         .copied()
         .find(|descriptor| descriptor.evaluator() == evaluator)
         .is_some_and(|descriptor| {
-            elementwise::value_argument_holds_array(context, descriptor, args)
+            elementwise::value_argument_holds_array_value(engine, context, descriptor, args)
         })
 }
 

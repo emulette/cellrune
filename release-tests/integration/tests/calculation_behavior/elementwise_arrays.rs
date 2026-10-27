@@ -4,9 +4,10 @@
 
 use cellrune::{
     CalculationCellId, CalculationCellResult, CalculationHints, CalculationLimits,
-    CalculationOptions, CellAddress, CellContent, CellRange, CellValue, DateSystem, FormulaCell,
-    FormulaDialect, FormulaMetadata, FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet,
-    SheetId, SheetName, SheetVisibility, WorkbookSnapshot, WorkbookSource, calculate_workbook,
+    CalculationOptions, CellAddress, CellContent, CellRange, CellValue, DateSystem, DefinedName,
+    DefinedNameScope, FormulaCell, FormulaDialect, FormulaMetadata, FormulaText, Provenance,
+    ProviderIdentity, SavedResult, Sheet, SheetId, SheetName, SheetVisibility, WorkbookSnapshot,
+    WorkbookSource, calculate_workbook,
 };
 
 /// How the formula under test is entered in `Z2`.
@@ -31,6 +32,17 @@ fn results_with(
     entry: Entry,
     formula: &str,
     cells: &[(&str, CellValue)],
+    options: CalculationOptions,
+) -> Vec<Vec<String>> {
+    results_named(entry, formula, cells, &[], options)
+}
+
+/// [`results_with`] in a workbook defining each of `names` as its formula.
+fn results_named(
+    entry: Entry,
+    formula: &str,
+    cells: &[(&str, CellValue)],
+    names: &[(&str, &str)],
     options: CalculationOptions,
 ) -> Vec<Vec<String>> {
     let sheet_id = SheetId::new(1).expect("valid sheet ID");
@@ -70,8 +82,22 @@ fn results_with(
             )),
         )
         .expect("unique formula address");
-    let workbook = WorkbookSnapshot::new(
+    let defined_names = names
+        .iter()
+        .map(|(name, formula)| {
+            DefinedName::new(
+                (*name).to_owned(),
+                DefinedNameScope::Workbook,
+                FormulaText::from_xlsx(*formula).expect("valid name formula"),
+                false,
+            )
+            .expect("valid defined name")
+        })
+        .collect();
+    let workbook = WorkbookSnapshot::new_with_metadata(
         vec![sheet],
+        defined_names,
+        Vec::new(),
         DateSystem::Excel1900,
         CalculationHints::default(),
         WorkbookSource::default(),
@@ -406,6 +432,27 @@ fn functions_without_established_array_rules_fail_explicitly_on_array_values() {
         assert_eq!(
             results(entry, formula, &cells),
             grid(&[&["calculation.unsupported_expression"]]),
+            "{formula}"
+        );
+    }
+    // A defined name holding an array value fails as the array it holds does, and a name of a
+    // range keeps its implicit intersection.
+    let names = [("Arr", "{0,1}"), ("Seq", "SEQUENCE(2)"), ("Cell", "A1")];
+    for (formula, expected) in [
+        ("SEQUENCE(Arr)", "calculation.unsupported_expression"),
+        ("SEQUENCE(Seq)", "calculation.unsupported_expression"),
+        ("OFFSET(A1,Arr,0)", "calculation.unsupported_expression"),
+        ("OFFSET(A1,Cell,0)", "2"),
+    ] {
+        assert_eq!(
+            results_named(
+                Entry::Dynamic,
+                formula,
+                &cells,
+                &names,
+                CalculationOptions::default()
+            ),
+            grid(&[&[expected]]),
             "{formula}"
         );
     }
