@@ -370,7 +370,8 @@ fn edits_that_move_or_resize_a_filter_recalculate_subtotal_as_a_full_calculation
         generated_hidden_rows_workbook(&["SUBTOTAL(9,C11:C14)", "SUBTOTAL(109,C11:C14)"]);
     let table_filter =
         generated_filtered_rows_workbook(&["SUBTOTAL(9,A21:A24)", "SUBTOTAL(109,A21:A24)"]);
-    let edits: [(&[u8], fn(&cellrune::WorkbookSnapshot) -> WorkbookChange); 4] = [
+    type Edit = fn(&cellrune::WorkbookSnapshot) -> WorkbookChange;
+    let edits: [(&[u8], Edit); 4] = [
         (&sheet_filter, |workbook| {
             WorkbookChange::insert_rows(workbook.sheets()[0].id(), row(8), 2).expect("insertion")
         }),
