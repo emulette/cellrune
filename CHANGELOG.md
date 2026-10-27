@@ -129,8 +129,11 @@ inventories, and measurements belong in the linked documentation rather than in 
   section, as Excel does: `TEXT("abc","0.00")` is `abc` and `TEXT(TRUE,"0")` is `TRUE` instead of
   `#VALUE!` and `1`. `@` in a section other than the last, `General`, a fourth section with
   digits or a condition, and a result past 255 UTF-16 code units are `#VALUE!` for them. Text
-  Excel reads as a number in a form CellRune leaves unread, such as `"1/2"`, `"Jan 2, 2024"`, and
-  `"12:99"`, is `calculation.unsupported_expression` in `TEXT` rather than shown as written. An
+  Excel may read as a number in a form CellRune leaves unread is
+  `calculation.unsupported_expression` in `TEXT` rather than shown as written: text that holds a
+  digit and otherwise only spaces, `,.:/-+%()`, currency symbols, an exponent, `AM`/`PM`, and
+  English month names, such as `"1/2"`, `"Jan 2, 2024"`, `"12:99"`, and `"€5"`, and also text
+  Excel keeps, such as `"010-1234-5678"`; format other text, or check it with `ISNUMBER`. An
   error in the value comes before one in the format (`TEXT(1/0,NA())` is `#DIV/0!`, as in
   0.1.27). The display text of a text cell is unsupported when its code is one `TEXT` rejects or
   its text section passes 255 units. Conditions in the number sections no longer make

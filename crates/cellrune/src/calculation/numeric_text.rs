@@ -23,6 +23,10 @@ const MAX_MAGNITUDE: f64 = 1e308;
 /// Seconds in a day.
 const DAY_SECONDS: f64 = 86_400.0;
 
+/// The currency symbols Excel may read before a number whatever the locale CellRune reads in:
+/// Mac Excel 16.114 in the en-KR region reads `€5` as well as `₩5`.
+const CURRENCY_SYMBOLS: [char; 5] = ['$', '₩', '€', '£', '¥'];
+
 /// The words, in lowercase, Excel may read within a number, a date, or a time: an exponent, the
 /// halves of the day, and the English month names and their abbreviations.
 const NUMBER_WORDS: [&str; 29] = [
@@ -87,16 +91,15 @@ impl NumericText {
 
     /// Whether Excel may read `text`, which [`Self::number`] leaves unread, as a number: text that
     /// holds a digit and nothing but the characters of numbers, dates, and times (`1/2`, `12:99`,
-    /// `1,0000`, `2:30 p`) or month names (`Jan 2, 2024`, `15-Jan-2024`). Excel reads those as
-    /// numbers (`TEXT("1/2","mm-dd")` is `01-02`, Mac Excel 16.114) while it keeps `Jan`, `abc`,
-    /// and `2024년 1월 15일` as text, so a caller that would show such text as written reports it as
-    /// unsupported instead.
+    /// `1,0000`, `2:30 p`), month names (`Jan 2, 2024`, `15-Jan-2024`), or a currency symbol of
+    /// another locale (`€5`). Excel reads those as numbers (`TEXT("1/2","mm-dd")` is `01-02`, Mac
+    /// Excel 16.114) while it keeps `Jan`, `abc`, and `2024년 1월 15일` as text, so a caller that
+    /// would show such text as written reports it as unsupported instead.
     pub(in crate::calculation) fn may_read_otherwise(self, text: &str) -> bool {
         let text = text.trim_matches(' ');
         if !text.bytes().any(|byte| byte.is_ascii_digit()) {
             return false;
         }
-        let currency = self.locale.currency_symbol();
         let mut rest = text;
         while let Some(character) = rest.chars().next() {
             if character.is_ascii_alphabetic() {
@@ -108,10 +111,11 @@ impl NumericText {
                     return false;
                 }
                 rest = &rest[end..];
-            } else if let Some(after) = rest.strip_prefix(currency) {
-                rest = after;
-            } else if character.is_ascii_digit() || " ,.:/-+%()".contains(character) {
-                rest = &rest[1..];
+            } else if character.is_ascii_digit()
+                || " ,.:/-+%()".contains(character)
+                || CURRENCY_SYMBOLS.contains(&character)
+            {
+                rest = &rest[character.len_utf8()..];
             } else {
                 return false;
             }

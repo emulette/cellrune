@@ -1478,10 +1478,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   one shows the text unchanged, whatever conditions its number sections hold.
   `@` in an earlier section, `General` anywhere, and a fourth section with
   digits or a condition are `#VALUE!` for text (`TEXT("abc","@;0")`,
-  `TEXT(TRUE,"General")`). Text Excel reads as a number in a form the reader
-  leaves unread (`"1/2"`, `"Jan 2, 2024"`, `"12:99"`) is
-  `calculation.unsupported_expression` rather than shown as written, and an
-  error in the value comes before one in the format.
+  `TEXT(TRUE,"General")`). Text Excel may read as a number in a form the reader
+  leaves unread is `calculation.unsupported_expression` rather than shown as
+  written: text holding a digit and otherwise only spaces, `,.:/-+%()`,
+  currency symbols, an exponent, `AM`/`PM`, and English month names (`"1/2"`,
+  `"Jan 2, 2024"`, `"12:99"`, `"€5"`, and also `"010-1234-5678"`, which Excel
+  keeps). An error in the value comes before one in the format.
 - `FIXED(number, [decimals], [no_commas])`, added in 0.1.27, and `DOLLAR(number,
   [decimals])` read numeric text as `VALUE` does, truncate `decimals` (default
   2; outside -308 through 127 is `#VALUE!`), and round as `ROUND` does, to

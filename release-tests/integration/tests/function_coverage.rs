@@ -1,9 +1,9 @@
 use cellrune::{
     ArithmeticSemantics, CalculationCellId, CalculationCellResult, CalculationHints,
     CalculationOptions, CellAddress, CellContent, CellValue, DateSystem, ExcelError, FormulaCell,
-    FormulaDialect, FormulaMetadata, FormulaText, Provenance, ProviderIdentity, SavedResult, Sheet,
-    SheetId, SheetName, SheetVisibility, WorkbookSnapshot, WorkbookSource, calculate_workbook,
-    scan_formula_capabilities,
+    FormulaDialect, FormulaMetadata, FormulaText, Locale, LocaleProfile, Provenance,
+    ProviderIdentity, SavedResult, Sheet, SheetId, SheetName, SheetVisibility, WorkbookSnapshot,
+    WorkbookSource, calculate_workbook, scan_formula_capabilities,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -1080,6 +1080,25 @@ fn text_excel_reads_as_a_number_in_unread_forms_is_unsupported_in_text() {
         let calculation = calculate_workbook(
             &workbook_with_formula_cases(&[text(formula, "")]),
             CalculationOptions::default(),
+        );
+        assert!(
+            matches!(
+                calculation.cell(calculation_cell_id(1, 1)),
+                Some(CalculationCellResult::Unavailable(_))
+            ),
+            "{formula}: {:?}",
+            calculation.cell(calculation_cell_id(1, 1))
+        );
+    }
+    // Mac Excel 16.114 in the en-KR region reads a currency symbol of another locale, `€5`, which
+    // the text reader reads only with the locale's own symbol.
+    for (locale, formula) in [
+        (Locale::KoKr, "TEXT(\"€5\",\"0.00\")"),
+        (Locale::EnUs, "TEXT(\"₩5\",\"0.00\")"),
+    ] {
+        let calculation = calculate_workbook(
+            &workbook_with_formula_cases(&[text(formula, "")]),
+            CalculationOptions::default().with_locale_profile(LocaleProfile::new(locale)),
         );
         assert!(
             matches!(
