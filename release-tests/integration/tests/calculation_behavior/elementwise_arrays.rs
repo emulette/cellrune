@@ -556,6 +556,10 @@ fn index_rows_and_columns_take_arrays_of_values() {
         ("ROWS(A1:A3*1)", grid(&[&["3"]])),
         ("ROWS(1)", grid(&[&["1"]])),
         ("COLUMNS(\"a\")", grid(&[&["1"]])),
+        // An error value is the result.
+        ("ROWS(1/0)", grid(&[&["#DIV/0!"]])),
+        ("COLUMNS(NA())", grid(&[&["#N/A"]])),
+        ("ROWS({1;#N/A})", grid(&[&["2"]])),
     ] {
         assert_eq!(
             results(Entry::Dynamic, formula, &cells),

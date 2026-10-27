@@ -163,8 +163,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   computed arrays where they took only references, as Excel does, instead of returning `#VALUE!`:
   `INDEX({10,20,30},2)` is `20`, `ROWS({1;2;3})` is `3`, `MATCH(4,{1,4,9},0)` is `2`,
   `INDEX(C1:C3,MATCH(1,(A1:A3="b")*(B1:B3=2),0))` finds the row meeting both conditions, and
-  `VLOOKUP(2,{1,"a";2,"b"},2,FALSE)` is `"b"`. An array of lookup values looks each one up in an
-  array context. `INDEX` of a reference of several rows and columns without a column is `#REF!`
+  `VLOOKUP(2,{1,"a";2,"b"},2,FALSE)` is `"b"`. `ROWS` and `COLUMNS` of an error value return that
+  error, so `ROWS(1/0)` is `#DIV/0!` instead of `#VALUE!`. An array of lookup values looks each one
+  up in an array context. `INDEX` of a reference of several rows and columns without a column is `#REF!`
   instead of the first column's cell, and `MATCH` over a lookup array of several rows and columns is
   `#N/A` instead of `calculation.unsupported_expression`. Give `INDEX` a column for a
   two-dimensional reference.

@@ -981,7 +981,11 @@ fn dimension(engine: &Engine<'_>, context: EvalContext<'_>, args: &[Expr], rows:
         Err(kind) if kind.is_engine_issue() => return Value::Error(kind),
         // An array or a single value has its own dimensions: `ROWS({1;2;3})` is 3 and `ROWS(1)` is
         // 1 (Mac Excel 16.114).
+        // An error value is the result, not one value of one row.
         Err(_) => match engine.eval_array(context, &args[0]) {
+            Ok(array) if array.is_scalar() && matches!(array.data[0], Value::Error(_)) => {
+                return array.data[0].clone();
+            }
             Ok(array) => (u64::from(array.rows), u64::from(array.cols)),
             Err(kind) => return Value::Error(kind),
         },
