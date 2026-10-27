@@ -63,9 +63,10 @@ impl CellPrecedents {
         &self.precedents
     }
 
-    /// Returns whether the formula's references depend on values, as `INDIRECT` and `OFFSET`
-    /// do, so the precedents are those the installed calculation's values resolved and can change
-    /// with the values.
+    /// Returns whether the formula's references depend on values, as `INDIRECT` and an `OFFSET`
+    /// whose position or size is not constant do, so the precedents are those the installed
+    /// calculation's values resolved and can change with the values. An `OFFSET` of a cell or
+    /// range by constant positions and size reads fixed cells and is not dynamic.
     pub const fn is_dynamic(&self) -> bool {
         self.dynamic
     }

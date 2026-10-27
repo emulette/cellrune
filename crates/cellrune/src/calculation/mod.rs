@@ -492,8 +492,8 @@ pub enum ArithmeticSemantics {
     #[default]
     ExcelNearZero,
     /// Use the IEEE-754 values unchanged in those places: no correction, exact comparison, and
-    /// rounding of the binary value. A place past the range of a double leaves the value
-    /// unchanged in either mode.
+    /// rounding of the binary value. In either mode a place past the range of a double leaves the
+    /// value unchanged, and a negative place past it rounds to `0`, or `#NUM!` for `ROUNDUP`.
     Ieee754,
 }
 

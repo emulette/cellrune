@@ -168,14 +168,15 @@ inventories, and measurements belong in the linked documentation rather than in 
   `INDEX(C1:C3,MATCH(1,(A1:A3="b")*(B1:B3=2),0))` finds the row meeting both conditions, and
   `VLOOKUP(2,{1,"a";2,"b"},2,FALSE)` is `"b"`. `ROWS` and `COLUMNS` of an error value return that
   error, so `ROWS(1/0)` is `#DIV/0!` instead of `#VALUE!`. An array of lookup values looks each one
-  up in an array context. `INDEX` of a reference of several rows and columns without a column is `#REF!`
-  instead of the first column's cell, and `MATCH` over a lookup array of several rows and columns is
-  `#N/A` instead of `calculation.unsupported_expression`. Give `INDEX` a column for a
+  up in an array context. `INDEX` of a reference of several rows and columns without a column is
+  `#REF!` instead of the first column's cell, and `MATCH` over a lookup array of several rows and
+  columns is `#N/A` instead of `calculation.unsupported_expression`. Give `INDEX` a column for a
   two-dimensional reference.
 - `IF` and `CHOOSE` return the reference they select, as Excel does: `ISREF(IF(TRUE,A1))` is
   `TRUE`, `ROWS(CHOOSE(2,A1:A2,A1:A5))` is `5`, and `SUM`, `COUNT`, `AND`, and the other aggregates
   pass over text and logical values in it as in any reference, so `SUM(IF(TRUE,A1))` with A1
-  holding the text `5` is `0` instead of `5`. A range may end in `IF` or `CHOOSE`, so
+  holding the text `5` is `0` instead of `5`. The reference stays one through a `LET` or `LAMBDA`
+  binding, so `LET(r,IF(TRUE,A1),ISREF(r))` is `TRUE`. A range may end in `IF` or `CHOOSE`, so
   `SUM(A1:IF(C1,A2,A6))` adds up to the selected cell instead of returning `#VALUE!`. A condition or
   index that holds an array still selects element by element. `AND` reads every element of an array argument, as `OR` and `XOR`
   do: `AND({TRUE,FALSE})` is `FALSE` instead of `calculation.unsupported_expression`.
@@ -199,7 +200,9 @@ inventories, and measurements belong in the linked documentation rather than in 
   `3`, and `MID` and `REPLACE` positions move alike. A position inside a surrogate pair splits it,
   and the half that is left becomes U+FFFD, since a text value cannot hold half a pair
   (`REPLACE("😀abc",1,1,"x")` is `x`, U+FFFD, `abc`, five code units as in Excel, where the half
-  stays). `LEFT` and `RIGHT` still keep a pair whole, as Excel does.
+  stays). `LEFT` and `RIGHT` still keep a pair whole, as Excel does. Text positions computed for
+  `MID`, `FIND`, or `REPLACE` from `LEN` stay consistent; positions computed outside the workbook
+  from Unicode scalar values need UTF-16 code units.
 - The calculated text limit counts UTF-16 code units instead of UTF-8 bytes, so text of up to
   32,767 characters calculates as in Excel whatever its script: `REPT("가",32767)` and the join of
   two 11,000-character Hangul texts are text instead of `#VALUE!` or
@@ -210,7 +213,13 @@ inventories, and measurements belong in the linked documentation rather than in 
   101 to 111 also skip rows hidden by hand: `SUBTOTAL(109,A1:A3)` with row 2 hidden leaves it out,
   and `SUBTOTAL(9,…)` leaves out the hidden rows inside a sheet or table auto-filter that declares
   a filter condition. Both counted every row before. Removing a filter keeps its rows hidden, so
-  they then count as hidden by hand, where Excel shows them again.
+  they then count as hidden by hand, where Excel shows them again; undoing the removal does not
+  restore the filter's conditions, which the inverse reports as an `UnrestoredContent` of kind
+  `UnrestoredContentKind::AutoFilter`, so the rows still count as hidden by hand. An edit to a
+  filter, a table, or the grid that changes which rows a filter hides reports
+  `calculation_metadata_changed` in its edit receipt (`calculationMetadataChanged` in Node.js),
+  and the next recalculation compiles the workbook again. Use `AGGREGATE` with option 4, which
+  ignores nothing, to count every row as `SUBTOTAL` did before.
 - The interop schema version is 2, for the renamed limit below. The Node.js binding checks it; a
   client that checks the version accepts 2.
 - An `Auto` session recalculation no longer compiles the whole workbook again after every edit
@@ -222,7 +231,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   in or behind a cycle or leaving formulas out at the dependency limit, and one whose references
   took more than one calculation pass to resolve still compile the workbook again with
   `DynamicTopology`. An `OFFSET` of a cell or range reference by constant
-  positions and size reads as a fixed range, so forced `Incremental` accepts it. Results are
+  positions and size that stays on the sheet reads as a fixed range, so forced `Incremental`
+  accepts it and its precedents and dependents are no longer marked `dynamic`. Results are
   unchanged.
 - Reading an XLSX keeps one copy of each shared string for all the literal cells naming it, and
   one number format for all the cells of a style, instead of one per cell. A workbook whose cells

@@ -86,5 +86,7 @@ pub const INTEROP_SCHEMA_VERSION: u32 = 2;
 /// Version of function usage reports with decimal-string JSON call counts.
 pub const INTEROP_FUNCTION_USAGE_SCHEMA_VERSION: u32 = 2;
 
-/// Version of the parallel table-authoring edit contract.
+/// Version of the parallel table-authoring edit contract, which its receipts carry in place of
+/// [`INTEROP_SCHEMA_VERSION`]. The two versions count separately and may be equal, so the
+/// request a receipt answers, not its version, tells the contracts apart.
 pub const INTEROP_EDIT_SCHEMA_V2: u32 = 2;

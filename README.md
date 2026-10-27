@@ -568,9 +568,10 @@ the same names, with `offset` and `limit`, page through the cells and ranges a c
 reads and the formulas that read the cell directly. They use the dependency graph of the
 calculation installed for the current revision, so they fail with `interop.calculation.required`
 until the workbook is calculated after an edit. A formula whose references depend on values, such
-as `INDIRECT` or `OFFSET`, is marked `dynamic`: its precedents are those the installed values
-resolved, and a dependents page counts the `unlisted_dynamic_formulas` that could read the cell
-after a value changes.
+as `INDIRECT` or an `OFFSET` whose position or size is not constant, is marked `dynamic`: its
+precedents are those the installed values resolved, and a dependents page counts the
+`unlisted_dynamic_formulas` that could read the cell after a value changes. An `OFFSET` of a cell
+or range by constant positions and size reads fixed cells and is not marked.
 
 Python and Node.js `close()` calls are idempotent. Once `close()` returns, the binding-owned native
 session has been released. An active calculation is cooperatively cancelled and a published preview

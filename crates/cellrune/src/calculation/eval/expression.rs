@@ -819,7 +819,8 @@ impl Engine<'_> {
     }
 
     /// Evaluates the root of a formula to an array, correcting each element of a root sum that
-    /// cancels to near zero as Excel does (`={0.1,1}+0.2-0.3` spills `0` and `0.9`).
+    /// cancels to near zero as Excel does (`={0.1,1}+0.2-0.3` spills `0` and
+    /// `0.8999999999999999`).
     pub(in crate::calculation) fn eval_final_array(
         &self,
         context: EvalContext<'_>,

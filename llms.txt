@@ -1644,7 +1644,8 @@ than guessing a name from a different XLSX crate (`calamine`,
   values below `18446744073709551615` are exact; that maximum means at least that many.
 - Function usage report schema version 2 preserves `call_count` as a decimal string
   in interop JSON and MCP. Rust DTOs retain `u64`, Python exposes `int`, and Node's
-  public `callCount` is `bigint`. Other reports keep their existing schema versions.
+  public `callCount` is `bigint`. Other reports carry the interop schema version,
+  2 since `max_text_length` replaced `max_text_bytes`.
   Node consumers must use bigint arithmetic and explicitly convert counts with
   `.toString()` when serializing to JSON; converting through `Number` loses precision.
 - `FunctionSupport`: `Supported | Unsupported`; it is independent from

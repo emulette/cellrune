@@ -4,13 +4,12 @@
 //! Microsoft documents that the byte functions count two bytes for a double-byte character only
 //! when the locale uses a double-byte character set, and count like their non-byte forms
 //! otherwise. Excel 16.114 without a double-byte language counts UTF-16 code units, so
-//! `LENB("😀")` is 2 and `FINDB("b","😀b")` is 3, and leaves `ASC` and `DBCS` text unchanged
-//! (excel-measure RESULTS.md, section D); `LEN` and the other non-byte functions still count
-//! characters until 0.2.0. Korean is a double-byte locale: its code page 949 stores ASCII in one
-//! byte and Hangul syllables, Hangul compatibility jamo, full-width ASCII forms, and the
-//! ideographic space in two. Other Korean characters, and positions that would split a surrogate
-//! pair or a double-byte character, are unsupported until Excel's handling of them is
-//! established.
+//! `LENB("😀")` is 2 and `FINDB("b","😀b")` is 3, as `LEN` and the other non-byte functions
+//! count, and leaves `ASC` and `DBCS` text unchanged. Korean is a double-byte locale: its code
+//! page 949 stores ASCII in one byte and Hangul syllables, Hangul compatibility jamo, full-width
+//! ASCII forms, and the ideographic space in two. Other Korean characters, and positions that
+//! would split a surrogate pair or a double-byte character, are unsupported until Excel's
+//! handling of them is established.
 
 use super::super::ast::Expr;
 use super::super::eval::{Engine, EvalContext};
