@@ -972,6 +972,27 @@ fn criteria_arrays_far_larger_than_the_range_stay_within_the_array_budget() {
 }
 
 #[test]
+fn a_selection_charges_its_elements_before_reading_them() {
+    // Each element of a selection counts as a function iteration, as an element-wise call's does.
+    let limited = CalculationOptions::default().with_limits(
+        CalculationLimits::default()
+            .with_max_function_iterations(5)
+            .expect("positive function iteration limit"),
+    );
+    for formula in [
+        "CHOOSE({1,1,1,1,1,1,1,1},\"a\")",
+        "IFS({TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE},1)",
+        "SWITCH({1,1,1,1,1,1,1,1},1,\"a\")",
+    ] {
+        assert_eq!(
+            results_with(Entry::Dynamic, formula, &[], limited),
+            grid(&[&["calculation.resource_limit_exceeded"]]),
+            "{formula}"
+        );
+    }
+}
+
+#[test]
 fn a_range_argument_given_by_a_call_or_name_stays_a_reference_while_another_argument_expands() {
     let cells = [
         ("A1", text("a")),

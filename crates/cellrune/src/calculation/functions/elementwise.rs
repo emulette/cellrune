@@ -289,6 +289,12 @@ pub(super) fn select(
     mut pick: impl FnMut(&[&Value]) -> Pick,
 ) -> Result<Array, ErrorKind> {
     let (rows, cols) = broadcast_all(selectors.iter())?;
+    // The selectors' shape bounds the work before any element is read, as in `lift`.
+    let cells = u64::from(rows) * u64::from(cols);
+    if cells > 1 {
+        engine.ensure_array_cells(cells)?;
+        engine.charge_function_iterations(context, cells)?;
+    }
     let picks_at = |row: u32, col: u32, pick: &mut dyn FnMut(&[&Value]) -> Pick| {
         let elements = selectors
             .iter()
