@@ -251,10 +251,8 @@ impl PreparedWorkbookTransaction {
             self.options,
             self.cancellation.clone(),
         )?;
-        let candidate_execution_mode = candidate_prepared.execution_mode();
-        let candidate_decision_reason = candidate_prepared.decision_reason();
-        let candidate_dirty_count = candidate_prepared.dirty_cells().len();
-        let planned_total = base_evaluated_count.saturating_add(candidate_dirty_count);
+        let planned_total =
+            base_evaluated_count.saturating_add(candidate_prepared.dirty_cells().len());
         if planned_total > self.limits.max_evaluated_cells {
             return Err(SessionError::new(
                 SessionErrorCode::EvaluationLimitExceeded,
@@ -266,6 +264,11 @@ impl PreparedWorkbookTransaction {
         }
         checkpoint(TransactionRunCheckpoint::CandidatePlanning);
         let candidate_execution = candidate_prepared.execute()?;
+        // The schedule that ran, which differs from the prepared one when a pass over the compiled
+        // state was discarded for a reference that moved.
+        let candidate_execution_mode = candidate_execution.execution_mode;
+        let candidate_decision_reason = candidate_execution.reason;
+        let candidate_dirty_count = candidate_execution.dirty_count;
         ensure_evaluated_resource_limits(
             &candidate_execution.calculation,
             &candidate_execution.evaluated_cells,

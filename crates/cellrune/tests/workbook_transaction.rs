@@ -1,10 +1,10 @@
 use cellrune::{
-    CalculationCellId, CalculationCellResult, CalculationLimits, CalculationOptions,
-    CancellationToken, CellAddress, CellContent, CellValue, EditBatch, FiniteNumber, FormulaText,
-    InstallDeltaBasisReason, RecalculationMode, SessionErrorCode, SessionLimits, SheetId,
-    TransactionDetailItem, TransactionDetailSection, TransactionImpactCause,
-    TransactionImpactCoverage, TransactionIssueChangeKind, WorkbookCalculationSession,
-    WorkbookChange,
+    CalculationCellId, CalculationCellResult, CalculationDecisionReason, CalculationExecutionMode,
+    CalculationLimits, CalculationOptions, CancellationToken, CellAddress, CellContent, CellValue,
+    EditBatch, FiniteNumber, FormulaText, InstallDeltaBasisReason, RecalculationMode,
+    SessionErrorCode, SessionLimits, SheetId, TransactionDetailItem, TransactionDetailSection,
+    TransactionImpactCause, TransactionImpactCoverage, TransactionIssueChangeKind,
+    WorkbookCalculationSession, WorkbookChange,
 };
 
 fn sheet() -> SheetId {

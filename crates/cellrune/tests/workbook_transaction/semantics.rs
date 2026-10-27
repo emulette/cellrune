@@ -296,6 +296,15 @@ fn a_pass_stops_at_the_first_reference_that_moves() {
         .run()
         .expect("transaction completes");
     assert!(moved.report().base_calculation_reused());
+    // The report names the schedule that ran: the workbook compiled again for the moved reference.
+    assert_eq!(
+        moved.report().candidate_execution_mode(),
+        CalculationExecutionMode::Full
+    );
+    assert_eq!(
+        moved.report().candidate_decision_reason(),
+        CalculationDecisionReason::DynamicTopology
+    );
     // The pass over the compiled state ends at `E1`, so the formulas after it are read once, by
     // the pass over the workbook compiled again, rather than twice.
     assert!(

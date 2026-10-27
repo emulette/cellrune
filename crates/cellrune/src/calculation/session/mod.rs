@@ -990,13 +990,12 @@ impl PreparedCalculation {
     ///
     /// An `Auto` job selected to apply formula edits incrementally runs in full when the compiled
     /// state cannot take them, and its delta then reports `Full` with `TopologyChanged` and every
-    /// formula of the workbook as dirty.
+    /// formula of the workbook as dirty. An `Auto` or `Full` job over the compiled state in which
+    /// a formula's references move to other targets, such as an `INDIRECT` whose text changed,
+    /// compiles the workbook again and runs in full, and its delta reports `Full` with
+    /// `DynamicTopology`.
     pub const fn execution_mode(&self) -> CalculationExecutionMode {
         self.execution_mode
-    }
-
-    pub(super) const fn decision_reason(&self) -> CalculationDecisionReason {
-        self.reason
     }
 
     pub(super) fn dirty_cells(&self) -> &BTreeSet<CalculationCellId> {
@@ -1106,9 +1105,9 @@ impl PreparedCalculation {
                     None => {
                         if execution_mode == CalculationExecutionMode::Incremental {
                             execution_mode = CalculationExecutionMode::Full;
-                            reason = CalculationDecisionReason::DynamicTopology;
                             dirty_count = formula_count()?;
                         }
+                        reason = CalculationDecisionReason::DynamicTopology;
                         discarded = Some(work);
                         None
                     }
