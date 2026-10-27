@@ -644,6 +644,23 @@ fn if_and_choose_return_the_reference_they_select() {
             vec![("A1", number(1.0)), ("A2", number(2.0))],
             "3",
         ),
+        // The selected reference stays one through a binding.
+        (
+            "LET(r,IF(TRUE,A1),ISREF(r))",
+            vec![("A1", number(1.0))],
+            "TRUE",
+        ),
+        ("LET(r,IF(TRUE,A1),SUM(r))", vec![("A1", text("5"))], "0"),
+        (
+            "LAMBDA(r,COUNTIF(r,1))(IF(TRUE,A1:A2))",
+            vec![("A1", number(1.0)), ("A2", number(2.0))],
+            "1",
+        ),
+        (
+            "SUMPRODUCT(COUNTIF(CHOOSE(1,A1:A2),A1:A2))",
+            vec![("A1", number(1.0)), ("A2", number(2.0))],
+            "2",
+        ),
     ] {
         assert_eq!(
             results(Entry::Legacy, formula, &cells),
@@ -651,6 +668,19 @@ fn if_and_choose_return_the_reference_they_select() {
             "{formula}"
         );
     }
+    // A function that takes a reference element by element reads the one `IF` selects.
+    assert_eq!(
+        results(
+            Entry::Dynamic,
+            "COUNTIF(IF(TRUE,A1:A3),{1,2,3})",
+            &[
+                ("A1", number(1.0)),
+                ("A2", number(2.0)),
+                ("A3", number(3.0))
+            ],
+        ),
+        grid(&[&["1", "1", "1"]])
+    );
 }
 
 #[test]

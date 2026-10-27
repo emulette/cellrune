@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use super::{Engine, EvalContext};
+use super::{Engine, EvalContext, Selection};
 use crate::calculation::ArithmeticSemantics;
 use crate::calculation::ast::{BinaryOp, Expr};
 use crate::calculation::coerce::to_number;
@@ -11,7 +11,7 @@ use crate::calculation::functions::{
     call_function_array, call_function_evaluation, call_returns_reference, callable_call_scope,
     direct_builtin_callable, function_call_shape_is_valid, function_evaluator,
     function_result_kind, intrinsic_scope_value, invoke_scope_value, lambda_scope_value,
-    let_scope_value, reduce_scope_value,
+    let_scope_value, reduce_scope_value, selection_elements,
 };
 use crate::calculation::limits::CalculationLimitKind;
 use crate::calculation::numeric_text::NumericText;
@@ -150,9 +150,21 @@ impl Engine<'_> {
                     _ if call_returns_reference(context, name, args) => self
                         .resolve_reference_value_expr(context, expr)
                         .map_or_else(scope_error, ScopeValue::Reference),
-                    _ => self
-                        .eval_array_evaluation(context, expr)
-                        .map_or_else(scope_error, scope_from_array),
+                    // `IF` and `CHOOSE` take the place of the branch they select, a reference
+                    // when it is one, so a binding keeps `IF(TRUE,A1)` a reference.
+                    _ => match self.selection(context, name, args) {
+                        Some(Ok(Selection::Branch(branch))) => {
+                            self.eval_scope_value(context, branch)
+                        }
+                        Some(Ok(Selection::Elements(selector))) => {
+                            selection_elements(self, context, expr, selector)
+                                .map(ArrayEvaluation::new)
+                                .map_or_else(scope_error, scope_from_array)
+                        }
+                        Some(Err(_)) | None => self
+                            .eval_array_evaluation(context, expr)
+                            .map_or_else(scope_error, scope_from_array),
+                    },
                 }
             }
             Expr::Invoke { callee, args } => invoke_expr_scope_value(self, context, callee, args),

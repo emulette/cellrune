@@ -4,12 +4,11 @@ use super::super::eval::{Engine, EvalContext, Selection};
 use super::super::excel_digits::cancel_near_zero;
 use super::super::limits::CalculationLimitKind;
 use super::super::numeric_text::NumericText;
-use super::super::runtime::{Array, CellId, Rect};
+use super::super::runtime::{CellId, Rect};
 use super::super::scope::ScopeValue;
 use super::super::sheet_span::SheetSpanPolicy;
 use super::super::value::{ErrorKind, Value};
-use super::kernel::{LegacyFunction, LookupFunction};
-use super::{DynamicFunction, Evaluator, function_evaluator, let_scope_value};
+use super::{DynamicFunction, Evaluator, function_evaluator, let_scope_value, selection_elements};
 
 #[derive(Debug, Clone)]
 pub(super) struct ArgumentValue {
@@ -184,29 +183,6 @@ fn collect_filtered_argument_values(
         }
     }
     Ok(values)
-}
-
-/// The values of a call to `IF` or `CHOOSE` whose condition or index, already evaluated, holds
-/// several values.
-fn selection_elements(
-    engine: &Engine<'_>,
-    context: EvalContext<'_>,
-    expr: &Expr,
-    selector: Array,
-) -> Result<Array, ErrorKind> {
-    match expr {
-        Expr::Paren(inner) => selection_elements(engine, context, inner, selector),
-        Expr::Call { name, args } => match function_evaluator(name) {
-            Some(Evaluator::Legacy(LegacyFunction::If)) => {
-                super::legacy::if_array_over(engine, context, args, selector)
-            }
-            Some(Evaluator::Lookup(LookupFunction::Choose)) => {
-                super::lookup::choose_array_over(engine, context, args, selector)
-            }
-            _ => Err(ErrorKind::Value),
-        },
-        _ => Err(ErrorKind::Value),
-    }
 }
 
 fn collection_preserving_scope_value(

@@ -471,7 +471,9 @@ impl Engine<'_> {
         }
     }
 
-    fn selection<'args>(
+    /// What a call to `name` with `args` selects when it is `IF` or `CHOOSE` that may return a
+    /// reference, with its condition or index evaluated once. `None` for other calls.
+    pub(in crate::calculation) fn selection<'args>(
         &self,
         context: EvalContext<'_>,
         name: &str,

@@ -930,6 +930,29 @@ pub(in crate::calculation) fn may_select_reference(args: &[Expr]) -> bool {
     args.iter().skip(1).any(may_be_reference)
 }
 
+/// The values of a call to `IF` or `CHOOSE` whose condition or index, already evaluated, holds
+/// several values.
+pub(in crate::calculation) fn selection_elements(
+    engine: &Engine<'_>,
+    context: EvalContext<'_>,
+    expr: &Expr,
+    selector: super::runtime::Array,
+) -> Result<super::runtime::Array, ErrorKind> {
+    match expr {
+        Expr::Paren(inner) => selection_elements(engine, context, inner, selector),
+        Expr::Call { name, args } => match function_evaluator(name) {
+            Some(Evaluator::Legacy(kernel::LegacyFunction::If)) => {
+                legacy::if_array_over(engine, context, args, selector)
+            }
+            Some(Evaluator::Lookup(kernel::LookupFunction::Choose)) => {
+                lookup::choose_array_over(engine, context, args, selector)
+            }
+            _ => Err(ErrorKind::Value),
+        },
+        _ => Err(ErrorKind::Value),
+    }
+}
+
 fn may_be_reference(expr: &Expr) -> bool {
     match expr {
         Expr::Paren(inner) => may_be_reference(inner),
