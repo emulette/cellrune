@@ -348,16 +348,24 @@ impl FifteenDigitBucket {
             .expect("scientific formatting writes an exponent");
         let units: u64 = mantissa.replace('.', "").parse().expect("formatted digits");
         let exponent: i32 = exponent.parse().expect("formatted exponent");
-        let midpoint = |numerator: u64| -> f64 {
-            format!("{numerator}e{}", exponent - 15)
+        let midpoint = |numerator: u64, power: i32| -> f64 {
+            format!("{numerator}e{power}")
                 .parse::<f64>()
                 .expect("formatted midpoint")
                 .copysign(value)
         };
         // Near the largest double a midpoint passes the range, as the rounding itself may.
         let finite = |bound: f64| bound.clamp(-f64::MAX, f64::MAX);
-        let mut low = finite(midpoint(units * 10 - 5));
-        let mut high = finite(midpoint(units * 10 + 5));
+        // Below a power of ten the fifteen-digit numbers lie ten times closer together, so the
+        // midpoint toward zero is half of their spacing away; the coarser one would leave dozens
+        // of doubles for the search below to walk.
+        let toward_zero = if units == 100_000_000_000_000 {
+            midpoint(units * 100 - 5, exponent - 16)
+        } else {
+            midpoint(units * 10 - 5, exponent - 15)
+        };
+        let mut low = finite(toward_zero);
+        let mut high = finite(midpoint(units * 10 + 5, exponent - 15));
         if low > high {
             (low, high) = (high, low);
         }
