@@ -201,6 +201,58 @@ fn options_mismatch_builds_the_base_and_topology_reports_conservative_impact() {
 }
 
 #[test]
+fn conservative_impact_recalculates_ordinary_readers_beside_a_dynamic_reference() {
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(
+            0,
+            EditBatch::new([
+                set_value("A1", 1.0),
+                WorkbookChange::set_cell_formula(sheet(), address("B1"), formula("A1*2")),
+                WorkbookChange::set_cell_formula(
+                    sheet(),
+                    address("D1"),
+                    formula("INDIRECT(\"Z1\")"),
+                ),
+            ]),
+        )
+        .expect("fixture installs");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("fixture calculates");
+    let mut completed = session
+        .prepare_transaction(
+            session.workbook().semantic_revision(),
+            EditBatch::new([set_value("A1", 5.0)]),
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("transaction prepares")
+        .run()
+        .expect("transaction completes");
+    assert_eq!(
+        completed.report().impact_coverage(),
+        TransactionImpactCoverage::ConservativeFull
+    );
+    assert_eq!(completed.report().preview_changed_count(), 1);
+    session
+        .install_transaction(&mut completed)
+        .expect("transaction installs");
+    let b1 = CalculationCellId::new(sheet(), address("B1"));
+    let installed = session
+        .calculation()
+        .expect("installed calculation")
+        .cell(b1)
+        .expect("B1 result");
+    assert_eq!(result_number(installed), 10.0);
+}
+
+#[test]
 fn issue_differences_and_empty_transactions_are_exact() {
     let mut session = calculated_session();
     let empty_error = session

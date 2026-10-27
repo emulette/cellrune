@@ -227,8 +227,11 @@ impl PreparedWorkbookTransaction {
                 BTreeSet::new(),
             )
         };
+        // Conservative impact evaluates every formula: an automatic pass from a state that follows
+        // edits would otherwise evaluate only the formulas whose references depend on values.
         let mut candidate_dirty = direct.clone();
         candidate_dirty.extend(transitive.iter().copied());
+        candidate_dirty.extend(conservative.iter().copied());
         let candidate_session = WorkbookCalculationSession {
             draft: self.candidate_draft,
             compiled: Some(Arc::clone(&base_compiled)),
