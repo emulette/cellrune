@@ -554,10 +554,10 @@ fn index_archive<R: Read + Seek>(
             [] => None,
             name => Some(PartPath::from_archive_name(name)?),
         };
-        // The ZIP reader does not check that compressed data lies inside the archive, and its
-        // overlap check adds each compressed size to the entry's data offset unchecked. Holding
-        // every entry, skipped ones included, to the archive length keeps that sum in range and
-        // the ratio check, and so every declared size a part read reserves, tied to bytes the
+        // The ZIP reader does not check that compressed data lies inside the archive, and before
+        // zip 9.1 its overlap check adds each compressed size to the entry's data offset unchecked.
+        // Holding every entry, skipped ones included, to the archive length keeps that sum in range
+        // and the ratio check, and so every declared size a part read reserves, tied to bytes the
         // input actually contains.
         let compressed = file.compressed_size();
         if compressed > archive_bytes {

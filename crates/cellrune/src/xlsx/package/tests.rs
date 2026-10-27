@@ -319,10 +319,13 @@ fn zip64_compressed_size_past_the_archive_is_rejected_before_the_overlap_check()
         if name != "[Content_Types].xml" {
             entries.push(FixtureEntry::stored(name, ""));
         }
-        let archive = declare_zip64_compressed_size(&build_archive(entries), name, u64::MAX);
+        let archive = build_archive(entries);
 
-        let error = inspect_package(Cursor::new(archive), ReadOptions::default())
-            .expect_err("compressed data past the archive end must be rejected");
+        let error = inspect_package(
+            Cursor::new(declare_zip64_compressed_size(&archive, name, 1 << 62)),
+            ReadOptions::default(),
+        )
+        .expect_err("compressed data past the archive end must be rejected");
         assert_eq!(error.code(), XlsxErrorCode::InvalidZip, "{name}: {error}");
         assert_eq!(
             error.detail(),
@@ -334,6 +337,15 @@ fn zip64_compressed_size_past_the_archive_is_rejected_before_the_overlap_check()
             source,
             "{name}"
         );
+
+        // A size whose end passes `u64::MAX` is rejected too, by the ZIP reader itself from
+        // zip 9.1 and by the archive-length check before.
+        let error = inspect_package(
+            Cursor::new(declare_zip64_compressed_size(&archive, name, u64::MAX)),
+            ReadOptions::default(),
+        )
+        .expect_err("an overflowing compressed size must be rejected");
+        assert_eq!(error.code(), XlsxErrorCode::InvalidZip, "{name}: {error}");
     }
 }
 
