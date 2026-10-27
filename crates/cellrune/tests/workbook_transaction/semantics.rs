@@ -253,6 +253,59 @@ fn conservative_impact_recalculates_ordinary_readers_beside_a_dynamic_reference(
 }
 
 #[test]
+fn a_pass_stops_at_the_first_reference_that_moves() {
+    // `E1` reads the cell `F1` names, and fifty formulas read `E1`.
+    let mut changes = vec![
+        WorkbookChange::set_cell_value(sheet(), address("F1"), CellValue::Text("G1".to_owned())),
+        set_value("G1", 3.0),
+        set_value("G2", 4.0),
+        WorkbookChange::set_cell_formula(sheet(), address("E1"), formula("INDIRECT(F1)")),
+    ];
+    for row in 1..=50 {
+        changes.push(set_value(&format!("A{row}"), f64::from(row)));
+        changes.push(WorkbookChange::set_cell_formula(
+            sheet(),
+            address(&format!("B{row}")),
+            formula(&format!("A{row}+$E$1")),
+        ));
+    }
+    let mut session = WorkbookCalculationSession::create();
+    session
+        .apply_changes(0, EditBatch::new(changes))
+        .expect("fixture installs");
+    session
+        .recalculate(
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("fixture calculates");
+    let moved = session
+        .prepare_transaction(
+            session.workbook().semantic_revision(),
+            EditBatch::new([WorkbookChange::set_cell_value(
+                sheet(),
+                address("F1"),
+                CellValue::Text("G2".to_owned()),
+            )]),
+            RecalculationMode::Auto,
+            CalculationOptions::default(),
+            CancellationToken::new(),
+        )
+        .expect("transaction prepares")
+        .run()
+        .expect("transaction completes");
+    assert!(moved.report().base_calculation_reused());
+    // The pass over the compiled state ends at `E1`, so the formulas after it are read once, by
+    // the pass over the workbook compiled again, rather than twice.
+    assert!(
+        moved.report().reference_cell_count() < 150,
+        "{}",
+        moved.report().reference_cell_count()
+    );
+}
+
+#[test]
 fn issue_differences_and_empty_transactions_are_exact() {
     let mut session = calculated_session();
     let empty_error = session

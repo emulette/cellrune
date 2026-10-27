@@ -276,18 +276,17 @@ impl<'workbook> Engine<'workbook> {
             Self::from_compiled(workbook, options, compiled, previous, dirty, cancelled)?;
         loop {
             let dirty = engine.dirty.clone();
-            let read_out_of_order =
-                engine.evaluate_compiled_schedule(compiled, dirty.as_ref(), cancelled)?;
+            if engine.evaluate_compiled_schedule(compiled, dirty.as_ref(), cancelled)? {
+                return Ok((engine, true));
+            }
             // A pass that read the kept result of a formula with a capability issue evaluates
             // that formula too, so that its readers read the value a full calculation gives them.
             let Some(mut dirty) = dirty else {
-                let stale = read_out_of_order || engine.targets_moved(compiled, cancelled)?;
-                return Ok((engine, stale));
+                return Ok((engine, false));
             };
             let reread = engine.capability_issue_reads(&dirty, cancelled)?;
             if reread.is_empty() {
-                let stale = read_out_of_order || engine.targets_moved(compiled, cancelled)?;
-                return Ok((engine, stale));
+                return Ok((engine, false));
             }
             dirty.extend(reread);
             engine = Self::from_compiled(workbook, options, compiled, previous, None, cancelled)?;
@@ -360,26 +359,23 @@ impl<'workbook> Engine<'workbook> {
         Ok(engine)
     }
 
-    /// Whether a formula of `compiled` whose references depend on values, evaluated in this pass,
-    /// resolves them with its values to other targets than `compiled` holds for it.
+    /// Whether `cell`, a formula of `compiled` whose references depend on values, resolves them
+    /// with the values of this pass to other targets than `compiled` holds for it.
     fn targets_moved(
         &self,
         compiled: &CompiledWorkbook,
+        cell: CellId,
         cancelled: &impl Fn() -> bool,
     ) -> Result<bool, ()> {
-        for cell in compiled.value_dependent_formulas() {
-            if self.evaluated_cells.contains(cell)
-                && self
-                    .formula_dependency_targets(*cell, cancelled)?
-                    .as_slice()
-                    != compiled.dependency_targets(*cell).unwrap_or_default()
-            {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        Ok(self.formula_dependency_targets(cell, cancelled)?.as_slice()
+            != compiled.dependency_targets(cell).unwrap_or_default())
     }
 
+    /// Evaluates the formulas of `compiled`, or only those in `dirty`, in its order, and returns
+    /// whether `compiled` no longer holds for the values, stopping at the first formula that shows
+    /// it: one that read another before it was calculated, or one whose references depend on
+    /// values and moved. The values a formula's references depend on precede it in the order, so
+    /// its targets are settled once it is evaluated.
     fn evaluate_compiled_schedule(
         &mut self,
         compiled: &CompiledWorkbook,
@@ -403,7 +399,7 @@ impl<'workbook> Engine<'workbook> {
         } else {
             compiled.schedule().order.clone()
         };
-        let mut read_out_of_order = false;
+        let value_dependent = compiled.value_dependent_formulas();
         for cell in cells {
             if cancelled() {
                 return Err(());
@@ -411,12 +407,17 @@ impl<'workbook> Engine<'workbook> {
             self.evaluated_cells.insert(cell);
             self.read_formula_before_calculation.set(false);
             self.evaluate_one(cell, cancelled)?;
-            read_out_of_order |= self.read_formula_before_calculation.get();
+            if self.read_formula_before_calculation.get()
+                || (value_dependent.contains(&cell)
+                    && self.targets_moved(compiled, cell, cancelled)?)
+            {
+                return Ok(true);
+            }
         }
         if cancelled() {
             return Err(());
         }
-        Ok(read_out_of_order)
+        Ok(false)
     }
 
     /// Evaluates the formulas of `scheduled` in its order, or only those in `dirty`, whose
