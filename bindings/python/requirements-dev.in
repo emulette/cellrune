@@ -1,2 +1,2 @@
-maturin==1.15.0
+maturin==1.16.0
 mypy==2.4.0
