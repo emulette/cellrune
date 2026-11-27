@@ -11,6 +11,7 @@ use cellrune::{
 
 use crate::convert::visibility_name;
 use crate::format_convert::format_edit_dto;
+use crate::validation_dto::set_data_validations_dto;
 use crate::{
     EditInverseDto, FormatChangeV2Dto, TableChangeV2Dto, UnrestoredContentDto, WorkbookChangeDto,
     WorkbookChangeV2Dto, WritableCellValueDto,
@@ -320,6 +321,13 @@ fn change_dto(change: &WorkbookChange, sheets: &mut InverseSheets) -> Option<Wor
             row: row.get(),
             height: *height,
         }),
+        WorkbookChange::SetDataValidations {
+            sheet_id,
+            validations,
+        } => WorkbookChangeV2Dto::Validation(set_data_validations_dto(
+            name(names, *sheet_id)?,
+            validations,
+        )),
         _ => return None,
     })
 }

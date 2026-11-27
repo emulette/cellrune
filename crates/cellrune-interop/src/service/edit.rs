@@ -12,6 +12,7 @@ use cellrune::{
 use super::WorkbookSession;
 use crate::convert::{edit_receipt, edit_receipt_v2, value_from_dto};
 use crate::format_convert::format_change;
+use crate::validation_dto::validation_change;
 use crate::{
     EditBatchDto, EditBatchV2Dto, EditReceiptDto, EditReceiptV2Dto, InteropError, TableChangeV2Dto,
     WorkbookChangeDto, WorkbookChangeV2Dto, WritableCellValueDto,
@@ -379,7 +380,7 @@ impl PreparedChanges {
     }
 }
 
-fn parse_range(value: &str) -> Result<CellRange, InteropError> {
+pub(crate) fn parse_range(value: &str) -> Result<CellRange, InteropError> {
     let (start, end) = value.split_once(':').unwrap_or((value, value));
     Ok(CellRange::new(
         CellAddress::from_a1(start)?,
@@ -721,6 +722,9 @@ pub(super) fn convert_edit_batch_v2(
             WorkbookChangeV2Dto::Table(change) => table_change(&converter, change)?,
             WorkbookChangeV2Dto::Format(change) => {
                 format_change(converter.resolve(change.sheet())?, change)?
+            }
+            WorkbookChangeV2Dto::Validation(change) => {
+                validation_change(converter.resolve(change.sheet())?, change)?
             }
         });
     }

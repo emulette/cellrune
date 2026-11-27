@@ -184,6 +184,15 @@ async function check(): Promise<void> {
   }
   // @ts-expect-error Sheet metadata pages take only an offset and a limit.
   reopened.dataValidations("Sheet1", { cursor: 1 });
+  const ruleEdits: readonly WorkbookChangeV2[] = [
+    ...validations.entries.map((rule) => ({ kind: "setDataValidation" as const, sheet: "Sheet1", rule })),
+    { kind: "clearDataValidations", sheet: "Sheet1", ranges: ["A1:B2"] },
+    { kind: "removeDataValidation", sheet: "Sheet1", index: 0 },
+    { kind: "setDataValidations", sheet: "Sheet1", rules: validations.entries },
+  ];
+  reopened.applyChangesV2(reopened.summary().semanticRevision, ruleEdits);
+  // @ts-expect-error A rule needs every field `dataValidations` returns.
+  const partialRule: WorkbookChangeV2 = { kind: "setDataValidation", sheet: "Sheet1", rule: { ranges: ["A1"] } };
   const compactPage = reopened.readRange("Sheet1", "A1", "B2", { compact: true, maxBytes: 4096 });
   compactPage.rows?.[0]?.length.toFixed(0);
   // @ts-expect-error Range forms are booleans.

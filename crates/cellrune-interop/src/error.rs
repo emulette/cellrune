@@ -61,6 +61,11 @@ const MESSAGE_PREVIEW_ID_EXHAUSTED: &str = "workbook preview identifier is exhau
 const MESSAGE_PREVIEW_SECTION_INVALID: &str = "preview detail section is not recognized";
 const MESSAGE_SERIALIZATION: &str = "interop DTO serialization failed";
 pub(crate) const DETAIL_FONT_UNDERLINE: &str = "font underline is not recognized";
+pub(crate) const DETAIL_VALIDATION_TYPE: &str = "data validation type is not recognized";
+pub(crate) const DETAIL_VALIDATION_OPERATOR: &str = "data validation operator is not recognized";
+pub(crate) const DETAIL_VALIDATION_ERROR_STYLE: &str =
+    "data validation error style is not recognized";
+pub(crate) const DETAIL_VALIDATION_INDEX: &str = "data validation index does not fit this platform";
 pub(crate) const DETAIL_FILL_PATTERN: &str = "fill pattern is not recognized";
 pub(crate) const DETAIL_BORDER_STYLE: &str = "border style is not recognized";
 pub(crate) const DETAIL_HORIZONTAL_ALIGNMENT: &str = "horizontal alignment is not recognized";

@@ -854,8 +854,11 @@ over a range whose first row is its header, and by stable ID rename_table, renam
 resize_table_rows, set_table_range to grow or shrink a table by rows and columns, \
 widen_table_columns, and convert_table_to_range; sheet autoFilter widening; and the \
 presentation-only set_cell_format, set_column_width, set_row_height, set_frozen_pane, \
-set_phonetics, and clear_phonetics operations, which keep the semantic revision. \
-changed_table_ids includes the tables create_table and copy_sheet create.",
+set_phonetics, and clear_phonetics operations, which keep the semantic revision; and the data \
+validation operations, which keep it too: set_data_validation with a rule in the shape \
+workbook_data_validations returns, whose cells leave every other rule, clear_data_validations \
+over ranges, remove_data_validation by index, and set_data_validations to replace a sheet's \
+rules. changed_table_ids includes the tables create_table and copy_sheet create.",
         annotations(
             title = "Apply workbook changes v2",
             read_only_hint = false,

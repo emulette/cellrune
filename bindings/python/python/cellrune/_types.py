@@ -1099,6 +1099,30 @@ class ClearPhoneticsChange(TypedDict):
     address: str
 
 
+class SetDataValidationChange(TypedDict):
+    kind: Literal["set_data_validation"]
+    sheet: str
+    rule: DataValidation
+
+
+class ClearDataValidationsChange(TypedDict):
+    kind: Literal["clear_data_validations"]
+    sheet: str
+    ranges: list[str]
+
+
+class RemoveDataValidationChange(TypedDict):
+    kind: Literal["remove_data_validation"]
+    sheet: str
+    index: int
+
+
+class SetDataValidationsChange(TypedDict):
+    kind: Literal["set_data_validations"]
+    sheet: str
+    rules: list[DataValidation]
+
+
 WorkbookChangeV2 = (
     WorkbookChange
     | RenameTableChange
@@ -1115,6 +1139,10 @@ WorkbookChangeV2 = (
     | SetFrozenPaneChange
     | SetPhoneticsChange
     | ClearPhoneticsChange
+    | SetDataValidationChange
+    | ClearDataValidationsChange
+    | RemoveDataValidationChange
+    | SetDataValidationsChange
 )
 
 

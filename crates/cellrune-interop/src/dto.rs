@@ -633,8 +633,9 @@ pub enum TableChangeV2Dto {
 /// One v2 workbook mutation.
 ///
 /// Existing v1 operations retain their exact tagged JSON shape; the second arm adds the
-/// table-authoring and autoFilter operations and the third the presentation operations: cell
-/// format, column width, row height, frozen pane, and phonetics.
+/// table-authoring and autoFilter operations, the third the presentation operations: cell
+/// format, column width, row height, frozen pane, and phonetics, and the fourth the data
+/// validation operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum WorkbookChangeV2Dto {
@@ -647,6 +648,9 @@ pub enum WorkbookChangeV2Dto {
     /// A presentation-only format or layout operation.
     #[serde(deserialize_with = "crate::deserialize_object")]
     Format(crate::FormatChangeV2Dto),
+    /// A data validation operation, which keeps the semantic revision.
+    #[serde(deserialize_with = "crate::deserialize_object")]
+    Validation(crate::DataValidationChangeV2Dto),
 }
 
 /// Ordered, atomic edit-schema-v2 change set.

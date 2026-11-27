@@ -115,7 +115,7 @@ impl WorkbookSession {
 }
 
 /// Renders a range as `sqref` does: one address for a one-cell range.
-fn reference_text(range: &CellRange) -> String {
+pub(crate) fn reference_text(range: &CellRange) -> String {
     if range.start() == range.end() {
         range.start().to_string()
     } else {
@@ -123,7 +123,7 @@ fn reference_text(range: &CellRange) -> String {
     }
 }
 
-fn data_validation_dto(validation: &DataValidation) -> DataValidationDto {
+pub(crate) fn data_validation_dto(validation: &DataValidation) -> DataValidationDto {
     DataValidationDto {
         ranges: validation.ranges().iter().map(reference_text).collect(),
         validation_type: validation.validation_type().as_str().to_owned(),

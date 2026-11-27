@@ -784,6 +784,44 @@ def assert_data_validations() -> None:
         lambda: workbook.data_validations("Data", limit=cast(int, True)),
     )
 
+    # A rule read back is a rule to write.
+    original = workbook.data_validations("Data")["entries"]
+    revision = workbook.summary()["semantic_revision"]
+    roles = dict(page["entries"][0], ranges=["F2:F10"], formula1="Lists!$A$1:$A$2")
+    receipt = workbook.apply_changes_v2(
+        revision,
+        [
+            {"kind": "set_data_validation", "sheet": "Data", "rule": roles},
+            {"kind": "clear_data_validations", "sheet": "Data", "ranges": ["A3:A5"]},
+        ],
+    )
+    assert receipt["result_revision"] == revision
+    edited = workbook.data_validations("Data")["entries"]
+    assert edited[0]["ranges"] == ["A1:A2", "C1"]
+    assert edited[-1] == roles
+    reopened = Workbook.from_bytes(workbook.edits_to_bytes())
+    assert sorted(map(repr, reopened.data_validations("Data")["entries"])) == sorted(
+        map(repr, edited)
+    )
+    inverse = receipt["inverse"]
+    assert inverse is not None
+    assert inverse["changes"][0]["kind"] == "set_data_validations"
+    workbook.apply_changes_v2(revision, inverse["changes"])
+    assert workbook.data_validations("Data")["entries"] == original
+    assert_validation_error(
+        "validation.data_validation_formula_missing",
+        lambda: workbook.apply_changes_v2(
+            revision,
+            [
+                {
+                    "kind": "set_data_validation",
+                    "sheet": "Data",
+                    "rule": dict(roles, formula1=None),
+                }
+            ],
+        ),
+    )
+
 
 def assert_formats() -> None:
     workbook = Workbook.from_bytes(SHEET_METADATA_FIXTURE_PATH.read_bytes())

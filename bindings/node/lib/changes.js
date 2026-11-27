@@ -2,6 +2,7 @@
 
 const { inputError } = require("./errors.js");
 const { serializeFormatChange } = require("./formats.js");
+const { serializeDataValidationChange } = require("./data_validations.js");
 const { serializePresentationChange } = require("./presentation.js");
 const {
   requireFinite,
@@ -268,6 +269,10 @@ function serializeWorkbookChangeV2(change, index) {
   const presentation = serializePresentationChange(change, index);
   if (presentation !== undefined) {
     return presentation;
+  }
+  const validation = serializeDataValidationChange(change, index);
+  if (validation !== undefined) {
+    return validation;
   }
   validateV2ChangeKeys(change, index);
   switch (change.kind) {

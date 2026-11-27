@@ -21,6 +21,7 @@ mod service;
 mod sheet_metadata;
 mod targeted;
 mod usage_count;
+mod validation_dto;
 mod values;
 pub use service::{CompletedTargetRequest, PreparedTargetRequest};
 pub use targeted::{
@@ -75,6 +76,7 @@ pub use sheet_metadata::{
     CommentDto, CommentPageDto, CommentReplyDto, DataValidationDto, DataValidationPageDto,
     HyperlinkDto, HyperlinkPageDto, SheetPageRequestDto,
 };
+pub use validation_dto::DataValidationChangeV2Dto;
 pub use values::{
     RangeCellValueDto, RangeReadOptionsDto, RangeValueDto, RangeValuesDto, RangeValuesRequestDto,
     RangeWriteRequestDto, UnavailableValueDto,

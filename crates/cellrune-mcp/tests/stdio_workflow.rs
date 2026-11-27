@@ -2137,6 +2137,41 @@ fn data_validations_are_a_bounded_stdio_page() {
     ));
     assert_eq!(error["code"], "interop.sheet.not_found");
 
+    // A rule read is a rule to write, and the receipt sets the rules back.
+    let mut rule = page["entries"][0].clone();
+    rule["ranges"] = json!(["F2:F10"]);
+    let summary =
+        successful_tool(mcp.call_tool("workbook_summary", json!({"session_id": session_id})));
+    let revision = summary["summary"]["semantic_revision"].clone();
+    let receipt = successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": revision,
+            "changes": [{"kind": "set_data_validation", "sheet": "Data", "rule": rule}]
+        }),
+    ));
+    assert_eq!(receipt["result_revision"], revision);
+    let edited = successful_tool(mcp.call_tool(
+        "workbook_data_validations",
+        json!({"session_id": session_id, "sheet": "Data"}),
+    ));
+    assert_eq!(edited["total"], 4);
+    assert_eq!(edited["entries"][3], rule);
+    successful_tool(mcp.call_tool(
+        "workbook_apply_changes_v2",
+        json!({
+            "session_id": session_id,
+            "expected_revision": revision,
+            "changes": receipt["inverse"]["changes"]
+        }),
+    ));
+    let restored = successful_tool(mcp.call_tool(
+        "workbook_data_validations",
+        json!({"session_id": session_id, "sheet": "Data"}),
+    ));
+    assert_eq!(restored["total"], 3);
+
     let hyperlinks = successful_tool(mcp.call_tool(
         "workbook_hyperlinks",
         json!({"session_id": session_id, "sheet": "Data"}),

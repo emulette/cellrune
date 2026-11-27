@@ -1053,6 +1053,40 @@ async function assertDataValidations() {
       return true;
     });
   }
+
+  // A rule read back is a rule to write.
+  const original = workbook.dataValidations("Data").entries;
+  const revision = workbook.summary().semanticRevision;
+  const roles = { ...page.entries[0], ranges: ["F2:F10"], formula1: "Lists!$A$1:$A$2" };
+  const receipt = workbook.applyChangesV2(revision, [
+    { kind: "setDataValidation", sheet: "Data", rule: roles },
+    { kind: "clearDataValidations", sheet: "Data", ranges: ["A3:A5"] },
+  ]);
+  assert.equal(receipt.resultRevision, revision, "rule edits keep the semantic revision");
+  const edited = workbook.dataValidations("Data").entries;
+  assert.deepEqual(edited[0].ranges, ["A1:A2", "C1"]);
+  assert.deepEqual(edited.at(-1), roles);
+  const reopened = await Workbook.fromBytes(await workbook.editsToBytes());
+  const sorted = (rules) => rules.map((rule) => JSON.stringify(rule)).sort();
+  assert.deepEqual(sorted(reopened.dataValidations("Data").entries), sorted(edited));
+  reopened.close();
+  assert.equal(receipt.inverse.changes[0].kind, "setDataValidations");
+  workbook.applyChangesV2(revision, receipt.inverse.changes);
+  assert.deepEqual(workbook.dataValidations("Data").entries, original);
+  assert.throws(
+    () =>
+      workbook.applyChangesV2(revision, [
+        { kind: "setDataValidation", sheet: "Data", rule: { ...roles, formula1: null } },
+      ]),
+    validationError("validation.data_validation_formula_missing"),
+  );
+  assert.throws(
+    () =>
+      workbook.applyChangesV2(revision, [
+        { kind: "setDataValidation", sheet: "Data", rule: { ...roles, allowBlank: "yes" } },
+      ]),
+    (error) => error instanceof CellRuneError && error.code === "interop.input.invalid",
+  );
   workbook.close();
 }
 

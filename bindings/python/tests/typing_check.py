@@ -9,6 +9,10 @@ from cellrune import (
     HyperlinkPage,
     SetCellFormatChange,
     DataValidationPage,
+    SetDataValidationChange,
+    ClearDataValidationsChange,
+    RemoveDataValidationChange,
+    SetDataValidationsChange,
     CalculationLimitOptions,
     LocaleProfile,
     ReadLimitOptions,
@@ -163,6 +167,22 @@ def check() -> None:
         rule["ranges"][0].upper()
         if rule["validation_type"] == "list" and rule["formula1"] is not None:
             rule["formula1"].upper()
+    rule_edits: list[WorkbookChangeV2] = [
+        SetDataValidationChange(kind="set_data_validation", sheet="Sheet1", rule=rule)
+        for rule in validations["entries"]
+    ]
+    rule_edits.append(
+        ClearDataValidationsChange(kind="clear_data_validations", sheet="Sheet1", ranges=["A1"])
+    )
+    rule_edits.append(
+        RemoveDataValidationChange(kind="remove_data_validation", sheet="Sheet1", index=0)
+    )
+    rule_edits.append(
+        SetDataValidationsChange(
+            kind="set_data_validations", sheet="Sheet1", rules=validations["entries"]
+        )
+    )
+    assert len(rule_edits) == len(validations["entries"]) + 3
     compact_page = reopened.read_range("Sheet1", "A1", "B2", compact=True, max_bytes=4096)
     for compact_row in compact_page.get("rows", []):
         len(compact_row)

@@ -1008,6 +1008,30 @@ export type WorkbookChangeV2 =
       readonly sheet: string;
       readonly row: number;
       readonly height: number | null;
+    }
+  | {
+      /** Applies a rule to its ranges; the cells leave every other rule. */
+      readonly kind: "setDataValidation";
+      readonly sheet: string;
+      readonly rule: DataValidation;
+    }
+  | {
+      /** Takes the cells of the ranges out of every rule, as Excel's Clear All does. */
+      readonly kind: "clearDataValidations";
+      readonly sheet: string;
+      readonly ranges: readonly string[];
+    }
+  | {
+      /** Removes the rule at a zero-based index, counted after the batch's earlier changes. */
+      readonly kind: "removeDataValidation";
+      readonly sheet: string;
+      readonly index: number;
+    }
+  | {
+      /** Replaces the sheet's whole list of rules, in order. */
+      readonly kind: "setDataValidations";
+      readonly sheet: string;
+      readonly rules: readonly DataValidation[];
     };
 
 export interface EditReceipt {

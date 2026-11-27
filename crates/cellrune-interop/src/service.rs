@@ -30,12 +30,14 @@ use crate::{CellReferenceDto, InteropError, ReadLimitOptionsDto};
 
 pub use calculation::{CompletedRecalculation, PreparedRecalculation};
 pub use display::format_display_text;
+pub(crate) use edit::parse_range;
 pub use edit::{PreparedChanges, PreparedChangesV2};
 pub use preview::{
     CompletedPreview, DEFAULT_PREVIEW_PAGE_SIZE, MAX_PREVIEW_PAGE_SIZE, PreparedPreview,
 };
 pub use query::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, function_catalog, function_catalog_page};
 pub use save::{PreparedEditsSave, PreparedWorkbookSave};
+pub(crate) use sheet_metadata::data_validation_dto;
 pub use values::MAX_RANGE_VALUE_CELLS;
 
 /// An owned high-level workbook editing, calculation, and save session.
