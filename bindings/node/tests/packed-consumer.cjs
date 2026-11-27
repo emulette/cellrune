@@ -22,6 +22,7 @@ const ROOT_ARCHIVE_FILES = [
   "index.mjs",
   "lib/abort.js",
   "lib/changes.js",
+  "lib/data_validations.js",
   "lib/dependencies.js",
   "lib/errors.js",
   "lib/formats.js",

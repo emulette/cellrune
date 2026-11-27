@@ -117,6 +117,7 @@ ROOT_NPM_FILES = frozenset(
         "package/index.mjs",
         "package/lib/abort.js",
         "package/lib/changes.js",
+        "package/lib/data_validations.js",
         "package/lib/dependencies.js",
         "package/lib/errors.js",
         "package/lib/formats.js",
