@@ -620,6 +620,9 @@ jobs:
           CFLAGS_aarch64_unknown_linux_gnu: -std=gnu99
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
           XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin
+          # The newest SDK in Microsoft's manifest, 10.0.26100, no longer ships the x86_64 headers
+          # cargo-xwin 0.23.0 looks for, so the cross-compile pins the previous SDK.
+          XWIN_SDK_VERSION: "10.0.22621"
 
       - name: Strip non-runtime native symbols
         run: python ../scripts/strip_native_artifacts.py ./*.node
