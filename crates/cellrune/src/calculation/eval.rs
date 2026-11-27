@@ -26,6 +26,7 @@ mod dependency;
 mod dependency_areas;
 mod expression;
 mod formula_columns;
+mod impact_update;
 mod materialization;
 mod name_graph;
 mod orchestration;

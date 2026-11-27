@@ -1624,6 +1624,147 @@ mod tests {
     }
 
     #[test]
+    fn formula_edits_update_the_impact_index_as_a_rebuild_would() {
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        let other = SheetId::new(2).expect("added sheet ID");
+        let formula = |text: &str| FormulaText::from_xlsx(text).expect("valid test formula");
+        let mut changes = vec![WorkbookChange::add_sheet(
+            SheetName::new("Other").expect("sheet name"),
+        )];
+        // Twenty formulas in column B make the ranges over them nest areas.
+        for row in 1..=20 {
+            changes.push(WorkbookChange::set_cell_value(
+                sheet,
+                CellAddress::from_indices(row, 1).expect("input cell"),
+                number(f64::from(row)),
+            ));
+            changes.push(WorkbookChange::set_cell_formula(
+                sheet,
+                CellAddress::from_indices(row, 2).expect("formula cell"),
+                formula(&format!("A{row}*2")),
+            ));
+        }
+        changes.extend([
+            WorkbookChange::set_cell_formula(sheet, address("C1"), formula("SUM(B1:B5)")),
+            WorkbookChange::set_cell_formula(sheet, address("C3"), formula("SUM(B1:B5)")),
+            WorkbookChange::set_cell_formula(sheet, address("C2"), formula("SUM(B4:B9)")),
+            WorkbookChange::set_cell_formula(sheet, address("D1"), formula("SUM(A1:A10)")),
+            WorkbookChange::set_cell_formula(sheet, address("D2"), formula("SUM(B1:B20)")),
+            WorkbookChange::set_cell_formula(
+                sheet,
+                address("F1"),
+                formula("SUM(Sheet1:Other!B1:B3)"),
+            ),
+            WorkbookChange::set_cell_formula(
+                sheet,
+                address("G1"),
+                formula("SUM(B1:INDEX(B1:B20,A3))"),
+            ),
+            WorkbookChange::set_cell_formula(sheet, address("H1"), formula("B7+1")),
+            WorkbookChange::set_cell_formula(other, address("A1"), formula("Sheet1!B2+1")),
+        ]);
+        let mut session = WorkbookCalculationSession::create();
+        session
+            .apply_changes(0, EditBatch::new(changes))
+            .expect("initial test workbook");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial calculation");
+
+        let edits = [
+            (
+                "a cell reference",
+                WorkbookChange::set_cell_formula(sheet, address("B2"), formula("A3*3")),
+            ),
+            (
+                "a range replaced",
+                WorkbookChange::set_cell_formula(sheet, address("C1"), formula("SUM(B1:B8)")),
+            ),
+            (
+                "a formula inside ranges removed",
+                WorkbookChange::set_cell_value(sheet, address("B5"), number(4.0)),
+            ),
+            (
+                "a formula inside a range added",
+                WorkbookChange::set_cell_formula(sheet, address("A5"), formula("1+1")),
+            ),
+            (
+                "a formula outside every range added",
+                WorkbookChange::set_cell_formula(sheet, address("E9"), formula("Other!A1*2")),
+            ),
+            (
+                "a 3-D range replaced by a value",
+                WorkbookChange::set_cell_value(sheet, address("F1"), number(1.0)),
+            ),
+            (
+                "an INDEX range end changed",
+                WorkbookChange::set_cell_formula(
+                    sheet,
+                    address("G1"),
+                    formula("SUM(B2:INDEX(B1:B20,A4))"),
+                ),
+            ),
+            (
+                "a formula that fails to parse",
+                WorkbookChange::set_cell_formula(sheet, address("C3"), formula("SUM(B1:B5")),
+            ),
+            (
+                "a formula that parses again",
+                WorkbookChange::set_cell_formula(sheet, address("C3"), formula("SUM(B1:B5)")),
+            ),
+            (
+                "a formula another reads as a cell removed",
+                WorkbookChange::set_cell_value(sheet, address("B7"), number(1.0)),
+            ),
+            (
+                "a formula inside nested areas removed",
+                WorkbookChange::set_cell_value(sheet, address("B15"), number(1.0)),
+            ),
+            (
+                "a formula inside nested areas added back",
+                WorkbookChange::set_cell_formula(sheet, address("B15"), formula("A15*2")),
+            ),
+            (
+                "a range moved to another sheet",
+                WorkbookChange::set_cell_formula(sheet, address("C2"), formula("SUM(Other!A1:A3)")),
+            ),
+        ];
+        for (label, edit) in edits {
+            session
+                .apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new([edit]),
+                )
+                .expect("formula edit");
+            let delta = session
+                .recalculate(
+                    RecalculationMode::Auto,
+                    CalculationOptions::default(),
+                    CancellationToken::new(),
+                )
+                .expect("incremental calculation");
+            assert_eq!(
+                delta.mode(),
+                CalculationExecutionMode::Incremental,
+                "{label}"
+            );
+            let compiled = session.compiled.clone().expect("compiled workbook");
+            assert!(compiled.impact_index_matches_build(), "{label}");
+            let incremental = session
+                .calculation()
+                .expect("calculation")
+                .cells()
+                .collect::<Vec<_>>();
+            let full = crate::calculate_workbook(session.workbook(), CalculationOptions::default());
+            assert_eq!(incremental, full.cells().collect::<Vec<_>>(), "{label}");
+        }
+    }
+
+    #[test]
     fn range_impact_index_visits_only_the_matching_sheet_local_intervals() {
         let sheet = SheetId::new(1).expect("valid default sheet ID");
         let mut changes = Vec::with_capacity(10_400);

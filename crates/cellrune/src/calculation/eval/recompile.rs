@@ -4,8 +4,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use super::impact_update::ImpactIndexChanges;
 use super::reference::cell_at;
-use super::{CompiledWorkbook, DependencyImpactIndex, Engine, public_to_internal};
+use super::{CompiledWorkbook, Engine, public_to_internal};
 use crate::calculation::graph::schedule_cancellable;
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::pipeline::formula_volatility;
@@ -191,8 +192,20 @@ impl CompiledWorkbook {
             .enumerate()
             .map(|(rank, cell)| (*cell, rank))
             .collect();
-        let impact_index =
-            DependencyImpactIndex::build(&targets, &graph, &self.static_array_regions, cancelled)?;
+        let mut regrouped = collected;
+        regrouped.extend(cells.iter().copied());
+        let impact_index = self.impact_index.updated(
+            &ImpactIndexChanges {
+                old_targets: &self.dependency_targets,
+                new_targets: &targets,
+                old_graph: &self.dependencies,
+                new_graph: &graph,
+                retargeted: &cells,
+                regrouped: &regrouped,
+                renumbered: &renumbered,
+            },
+            cancelled,
+        )?;
         Ok(Some(RecompiledWorkbook {
             compiled: Self {
                 asts: Arc::clone(&engine.asts),
