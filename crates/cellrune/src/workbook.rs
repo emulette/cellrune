@@ -16,10 +16,10 @@ mod table_index;
 
 pub use annotations::{Comment, CommentReply, Hyperlink};
 pub use auto_filter::SheetAutoFilter;
-pub(crate) use data_validation::DataValidationRule;
 pub use data_validation::{
     DataValidation, DataValidationErrorStyle, DataValidationOperator, DataValidationType,
 };
+pub(crate) use data_validation::{DataValidationRule, parse_sqref};
 pub(crate) use grid_transform::grid_metadata;
 pub(crate) use new_cell_styles::NewCellStyles;
 pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};
@@ -374,6 +374,9 @@ pub struct Sheet {
     auto_filter: Option<SheetAutoFilter>,
     hidden_rows: Arc<Vec<Row>>,
     data_validations: Arc<Vec<DataValidation>>,
+    /// The ranges of the data validation rules the reader could not model, which only the saved
+    /// part holds: `None` for a rule whose range list could not be read.
+    unmodeled_validations: Arc<Vec<Option<Vec<CellRange>>>>,
     hyperlinks: Arc<Vec<Hyperlink>>,
     comments: Arc<Vec<Comment>>,
     new_cell_styles: Arc<NewCellStyles>,
@@ -403,6 +406,7 @@ impl Sheet {
             auto_filter: self.auto_filter.clone(),
             hidden_rows: Arc::clone(&self.hidden_rows),
             data_validations: Arc::clone(&self.data_validations),
+            unmodeled_validations: Arc::clone(&self.unmodeled_validations),
             hyperlinks: Arc::clone(&self.hyperlinks),
             comments: Arc::clone(&self.comments),
             new_cell_styles: Arc::clone(&self.new_cell_styles),
@@ -430,6 +434,7 @@ impl Sheet {
             auto_filter: None,
             hidden_rows: Arc::new(Vec::new()),
             data_validations: Arc::new(Vec::new()),
+            unmodeled_validations: Arc::new(Vec::new()),
             hyperlinks: Arc::new(Vec::new()),
             comments: Arc::new(Vec::new()),
             new_cell_styles: Arc::default(),
@@ -744,6 +749,16 @@ impl Sheet {
         self.data_validations = Arc::new(data_validations);
     }
 
+    /// Returns the ranges of the data validation rules the reader could not model, `None` for a
+    /// rule whose range list could not be read.
+    pub(crate) fn unmodeled_validations(&self) -> &[Option<Vec<CellRange>>] {
+        &self.unmodeled_validations
+    }
+
+    pub(crate) fn set_unmodeled_validations(&mut self, ranges: Vec<Option<Vec<CellRange>>>) {
+        self.unmodeled_validations = Arc::new(ranges);
+    }
+
     /// Returns the sheet's hyperlinks in worksheet order.
     ///
     /// A hyperlink whose `ref` does not parse is left unmodeled; its XML is preserved either way.
@@ -1010,6 +1025,10 @@ impl SheetBuilder {
 
     pub(crate) fn set_data_validations(&mut self, data_validations: Vec<DataValidation>) {
         self.sheet.data_validations = Arc::new(data_validations);
+    }
+
+    pub(crate) fn set_unmodeled_validations(&mut self, ranges: Vec<Option<Vec<CellRange>>>) {
+        self.sheet.unmodeled_validations = Arc::new(ranges);
     }
 
     pub(crate) fn new_cell_styles_mut(&mut self) -> &mut NewCellStyles {

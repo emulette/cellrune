@@ -56,6 +56,11 @@ pub(crate) use analysis_cache::WorkbookAnalysisCache;
 pub(crate) use eval::static_impact::{DraftEdits, affected_formulas};
 pub(crate) use functions::{calendar_date_exists, serial_from_calendar_date};
 
+/// Whether `text`, a formula without its leading `=`, parses under the default limits.
+pub(crate) fn formula_parses(text: &str) -> bool {
+    parser::parse_formula_with_limits(text, CalculationLimits::default()).is_ok()
+}
+
 use error::{
     MESSAGE_BLOCKED_BY_UPSTREAM, MESSAGE_CIRCULAR_REFERENCE, MESSAGE_MISSING_FORMULA_TEXT,
     MESSAGE_PARSE_ERROR, MESSAGE_RESOURCE_LIMIT_EXCEEDED, MESSAGE_UNSUPPORTED_EXPRESSION,

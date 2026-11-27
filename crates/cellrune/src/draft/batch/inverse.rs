@@ -23,8 +23,8 @@ use crate::{
 ///
 /// Applied as one batch to the workbook the batch produced, [`Self::changes`] bring back its
 /// cells, formulas, number and cell formats, defined names, sheet names and visibility, table
-/// names and data rows, row heights, and column widths. [`Self::unrestored`] lists the content
-/// they cannot bring back.
+/// names and data rows, row heights, and column widths, and the data validation rules of a sheet
+/// a data validation edit changed. [`Self::unrestored`] lists the content they cannot bring back.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditInverse {
     changes: Vec<WorkbookChange>,
@@ -140,6 +140,9 @@ pub(super) struct InverseSeed {
     pub(super) steps: Vec<UndoStep>,
     /// Source sheets whose preserved package content a deletion or range move removed or moved.
     pub(super) preserved_sheets: BTreeSet<SheetId>,
+    /// Sheets whose data validation rules a data validation edit changed, whose rules the inverse
+    /// sets back whole.
+    pub(super) validation_sheets: BTreeSet<SheetId>,
 }
 
 /// One change of a batch whose undo is a structural change, with what the undo needs from the
@@ -233,6 +236,37 @@ impl Recreated {
 /// Builds the inverse of the batch that turned `before` into `after`. Returns `None` when the
 /// structural edits that undo the batch's own cannot be applied to its result, as when a later
 /// change filled the rows a deletion freed.
+/// Returns the inverse of a batch of data validation edits alone, which only change the rule lists
+/// of the sheets in `validation_sheets`: setting those lists back undoes it, without comparing
+/// the rest of the workbook.
+pub(super) fn validation_inverse(before: &WorkbookDraft, seed: &InverseSeed) -> EditInverse {
+    EditInverse {
+        changes: seed
+            .validation_sheets
+            .iter()
+            .filter_map(|sheet_id| {
+                let sheet = before.workbook().sheet_by_id(*sheet_id)?;
+                Some(WorkbookChange::set_data_validations(
+                    *sheet_id,
+                    sheet.data_validations().to_vec(),
+                ))
+            })
+            .collect(),
+        unrestored: Vec::new(),
+    }
+}
+
+/// Reports whether a change only edits data validation rules.
+pub(super) const fn is_validation_change(change: &WorkbookChange) -> bool {
+    matches!(
+        change,
+        WorkbookChange::SetDataValidation { .. }
+            | WorkbookChange::ClearDataValidations { .. }
+            | WorkbookChange::RemoveDataValidation { .. }
+            | WorkbookChange::SetDataValidations { .. }
+    )
+}
+
 pub(super) fn edit_inverse(
     before: &WorkbookDraft,
     after: &WorkbookDraft,
@@ -373,6 +407,25 @@ pub(super) fn edit_inverse(
             cancelled,
         )?;
     }
+
+    // Data validation edits split, shorten, remove, and reorder rules, which only the whole list
+    // brings back.
+    let validations = seed
+        .validation_sheets
+        .iter()
+        .filter_map(|sheet_id| {
+            let sheet = before.workbook().sheet_by_id(*sheet_id)?;
+            let target = recreated.sheet(*sheet_id);
+            let current = restored.workbook().sheet_by_id(target)?;
+            (current.data_validations() != sheet.data_validations()).then(|| {
+                WorkbookChange::set_data_validations(target, sheet.data_validations().to_vec())
+            })
+        })
+        .collect::<Vec<_>>();
+    if !apply(&mut restored, validations.clone(), cancelled)? {
+        return Ok(None);
+    }
+    changes.extend(validations);
 
     for sheet in before.workbook().sheets() {
         let target = recreated.sheet(sheet.id());
@@ -1004,8 +1057,8 @@ pub(super) const fn moves_preserved_content(edit: GridEdit) -> bool {
 }
 
 /// Reports whether a change makes the batch's receipt carry an inverse: the structural edits of
-/// sheets, defined names, tables, and the grid that 0.1.27 added. Batches of earlier changes alone
-/// keep the receipts they had.
+/// sheets, defined names, tables, and the grid that 0.1.27 added, and the data validation edits.
+/// Batches of earlier changes alone keep the receipts they had.
 pub(super) const fn has_inverse(change: &WorkbookChange) -> bool {
     matches!(
         change,
@@ -1026,7 +1079,7 @@ pub(super) const fn has_inverse(change: &WorkbookChange) -> bool {
             | WorkbookChange::ConvertTableToRange { .. }
             | WorkbookChange::SetTableRange { .. }
             | WorkbookChange::SetSheetAutoFilter { .. }
-    )
+    ) || is_validation_change(change)
 }
 
 #[cfg(test)]

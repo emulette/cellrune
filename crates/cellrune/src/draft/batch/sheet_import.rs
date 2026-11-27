@@ -56,9 +56,10 @@ impl ImportedSheet {
     /// Returns [`ValidationError::UnknownSheetId`] for a missing sheet, or
     /// [`ValidationError::SheetImportUnsupported`] naming the first content the import cannot
     /// carry: a formula that does not parse or that reads another sheet, another workbook, a
-    /// table on another sheet, or a name that does; data validations, hyperlinks, comments,
-    /// auto-filter criteria, row or column styles, a right-to-left view, or phonetic settings,
-    /// which the model does not write for a new sheet; and worksheet content only the source
+    /// table on another sheet, or a name that does; data validations, whose formulas the import
+    /// does not rewrite; hyperlinks, comments, auto-filter criteria, row or column styles, a
+    /// right-to-left view, or phonetic settings, which the model does not write for a new sheet;
+    /// and worksheet content only the source
     /// package carries, such as conditional formats, drawings, or pivot tables. Print and view
     /// settings, such as margins, page setup, headers and footers, and the default row height,
     /// are not carried.
@@ -248,6 +249,9 @@ impl ImportedSheet {
         }
         let mut sheet = original.clone();
         sheet.clear_new_cell_styles();
+        // The imported sheet is written from the model, so the rules only the source part holds
+        // do not come with it.
+        sheet.set_unmodeled_validations(Vec::new());
         Ok(Self(Arc::new(ImportedSheetData {
             sheet,
             date_system: workbook.date_system(),

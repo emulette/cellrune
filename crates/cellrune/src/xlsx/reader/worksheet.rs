@@ -529,7 +529,9 @@ pub(super) fn parse(
     }
     sheet.set_merged_ranges(state.merged_ranges.finish(sheet_id, diagnostics, &budget)?);
     sheet.set_auto_filter(state.auto_filter.finish());
-    sheet.set_data_validations(state.data_validations.finish());
+    let (validations, unmodeled_validations) = state.data_validations.finish();
+    sheet.set_data_validations(validations);
+    sheet.set_unmodeled_validations(unmodeled_validations);
     *hyperlinks = state.hyperlinks.finish();
     Ok(())
 }

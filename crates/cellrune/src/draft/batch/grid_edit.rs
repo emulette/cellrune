@@ -15,7 +15,7 @@ use crate::calculation::formula_rewrite::{
 };
 use crate::calculation::grid_rewrite::{GridChange, move_anchored_formulas};
 use crate::calculation::sheet_changes::SheetChanges;
-use crate::grid::{GridAxis, GridEdit, GridHistory};
+use crate::grid::{GridAxis, GridEdit, GridHistory, RangeRule};
 use crate::workbook::NonWorksheetTabs;
 use crate::{
     CalculationCellId, CellAddress, CellContent, CellRange, CellValue, Column, DataValidation,
@@ -229,6 +229,18 @@ pub(super) fn apply_grid_edit(
     let tables = moved_tables(sheet, edit)?;
     let mut changed = sheet.apply_grid_edit(edit, &rewritten);
     sheet.set_data_validations(validations.into_iter().flatten().collect());
+    let unmodeled = sheet
+        .unmodeled_validations()
+        .iter()
+        .filter_map(|ranges| match ranges {
+            Some(ranges) => {
+                let moved = edit.map_ranges(ranges, RangeRule::Format);
+                (!moved.is_empty()).then_some(Some(moved))
+            }
+            None => Some(None),
+        })
+        .collect();
+    sheet.set_unmodeled_validations(unmodeled);
     let mut headers = Vec::new();
     let previous_tables = sheet.tables().to_vec();
     let mut moved = Vec::with_capacity(tables.len());

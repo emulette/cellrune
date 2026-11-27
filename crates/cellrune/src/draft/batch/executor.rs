@@ -13,7 +13,8 @@ use super::formula_edit::{
 };
 use super::grid_edit::{GridEditState, apply_grid_edit, grid_change, remove_deleted_table_columns};
 use super::inverse::{
-    InverseSeed, TableShape, UndoStep, edit_inverse, has_inverse, moves_preserved_content,
+    InverseSeed, TableShape, UndoStep, edit_inverse, has_inverse, is_validation_change,
+    moves_preserved_content, validation_inverse,
 };
 use super::name_rename::rename_defined_name;
 use super::sheet_copy::{SheetCopy, copy_sheet};
@@ -28,6 +29,9 @@ use super::table_edit::{
     resize_table_rows, table_header_column, table_header_edit_error, table_locations,
 };
 use super::table_range::set_table_range;
+use super::validation_edit::{
+    clear_data_validations, remove_data_validation, set_data_validation, set_data_validations,
+};
 use super::widen_edit::{align_filter_database_name, widen_sheet_auto_filter, widen_table_columns};
 use super::{
     BatchExecutionError, EditBatch, EditReceipt, TableMaterializationBudget, WorkbookChange,
@@ -1184,6 +1188,36 @@ impl WorkbookDraft {
                             .insert(CalculationCellId::new(*sheet_id, *address));
                     }
                 }
+                WorkbookChange::SetDataValidation {
+                    sheet_id,
+                    validation,
+                } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    if set_data_validation(sheet, validation)? {
+                        inverse_seed.validation_sheets.insert(*sheet_id);
+                    }
+                }
+                WorkbookChange::ClearDataValidations { sheet_id, ranges } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    if clear_data_validations(sheet, ranges)? {
+                        inverse_seed.validation_sheets.insert(*sheet_id);
+                    }
+                }
+                WorkbookChange::RemoveDataValidation { sheet_id, index } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    if remove_data_validation(sheet, *index)? {
+                        inverse_seed.validation_sheets.insert(*sheet_id);
+                    }
+                }
+                WorkbookChange::SetDataValidations {
+                    sheet_id,
+                    validations,
+                } => {
+                    let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
+                    if set_data_validations(sheet, validations)? {
+                        inverse_seed.validation_sheets.insert(*sheet_id);
+                    }
+                }
             }
             let names_changed = names_before.is_some_and(|before| before != defined_names);
             if table_edited {
@@ -1284,10 +1318,12 @@ impl WorkbookDraft {
             }) && filtered_rows_changed(&self.workbook, &next.workbook));
         // The inverse is built before the batch is installed, so a cancelled build leaves the
         // draft unchanged.
-        let inverse = if with_inverse {
-            edit_inverse(self, &next, inverse_seed, rewrite_budget.cancellation())?.map(Box::new)
-        } else {
+        let inverse = if !with_inverse {
             None
+        } else if batch.changes().iter().all(is_validation_change) {
+            Some(Box::new(validation_inverse(self, &inverse_seed)))
+        } else {
+            edit_inverse(self, &next, inverse_seed, rewrite_budget.cancellation())?.map(Box::new)
         };
         *self = next;
 

@@ -3,10 +3,8 @@ use quick_xml::reader::NsReader;
 
 use super::super::XlsxReadError;
 use super::super::xml::{XmlAttributes, XmlBudget, is_element_in_namespace};
-use crate::workbook::DataValidationRule;
-use crate::{
-    CellRange, DataValidation, DataValidationErrorStyle, DataValidationOperator, DataValidationType,
-};
+use crate::workbook::{DataValidationRule, parse_sqref};
+use crate::{CellRange, DataValidation};
 
 /// Holds `x14:dataValidations`, Excel 2010's form for rules whose formulas name another sheet.
 const X14_MAIN: &str = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
@@ -79,6 +77,8 @@ struct PendingValidation {
     formula1: Option<String>,
     formula2: Option<String>,
     repeated: bool,
+    /// Whether the `xm:sqref` element repeats, which leaves the ranges unknown.
+    repeated_ranges: bool,
     /// The open `x14:formula1` or `x14:formula2` whose `xm:f` child holds the formula.
     formula_parent: Option<(u64, Slot)>,
     /// The open element whose text is being collected.
@@ -94,33 +94,40 @@ impl PendingValidation {
         };
         if target.replace(text).is_some() {
             self.repeated = true;
+            self.repeated_ranges |= slot == Slot::Ranges;
         }
     }
 
-    fn finish(self) -> Option<DataValidation> {
-        if self.repeated {
-            return None;
+    /// Returns the modeled rule, or the ranges of a rule left unmodeled.
+    fn finish(self) -> Result<DataValidation, Option<Vec<CellRange>>> {
+        let ranges = if self.repeated_ranges {
+            None
+        } else {
+            self.ranges.as_deref().and_then(parse_sqref)
+        };
+        match (ranges, self.rule, self.repeated) {
+            (Some(ranges), Some(rule), false) => Ok(DataValidation::from_xlsx(
+                ranges,
+                rule,
+                self.formula1.map(String::into_boxed_str),
+                self.formula2.map(String::into_boxed_str),
+            )),
+            (ranges, _, _) => Err(ranges),
         }
-        let ranges = parse_ranges(self.ranges.as_deref()?)?;
-        Some(DataValidation::from_xlsx(
-            ranges,
-            self.rule?,
-            self.formula1.map(String::into_boxed_str),
-            self.formula2.map(String::into_boxed_str),
-        ))
     }
 }
 
 /// Collects the worksheet's `<dataValidations>` and `<x14:dataValidations>` rules.
 ///
 /// A rule with a missing or malformed range list, a repeated formula or range element, or an
-/// unknown attribute token is left unmodeled. Its XML is preserved either way, so such a rule keeps
-/// its source form.
+/// unknown attribute token is left unmodeled, and only its ranges are kept, when they can be read.
+/// Its XML is preserved either way, so such a rule keeps its source form.
 #[derive(Debug, Default)]
 pub(super) struct DataValidationCollector {
     container: Option<(u64, Dialect)>,
     pending: Option<PendingValidation>,
     validations: Vec<DataValidation>,
+    unmodeled: Vec<Option<Vec<CellRange>>>,
 }
 
 impl DataValidationCollector {
@@ -162,7 +169,7 @@ impl DataValidationCollector {
             {
                 self.pending = Some(PendingValidation {
                     depth,
-                    rule: parse_rule(attributes),
+                    rule: DataValidationRule::from_attributes(|name| attributes.unqualified(name)),
                     ranges: match dialect {
                         Dialect::Main => attributes.unqualified("sqref").map(str::to_owned),
                         Dialect::X14 => None,
@@ -170,6 +177,7 @@ impl DataValidationCollector {
                     formula1: None,
                     formula2: None,
                     repeated: false,
+                    repeated_ranges: false,
                     formula_parent: None,
                     capture: None,
                 });
@@ -246,46 +254,18 @@ impl DataValidationCollector {
                 pending.formula_parent = None;
             } else if pending.depth == depth {
                 let pending = self.pending.take().expect("open validation");
-                self.validations.extend(pending.finish());
+                match pending.finish() {
+                    Ok(validation) => self.validations.push(validation),
+                    Err(ranges) => self.unmodeled.push(ranges),
+                }
             }
         } else if container_depth == depth {
             self.container = None;
         }
     }
 
-    pub(super) fn finish(self) -> Vec<DataValidation> {
-        self.validations
+    /// Returns the modeled rules and the ranges of the unmodeled ones.
+    pub(super) fn finish(self) -> (Vec<DataValidation>, Vec<Option<Vec<CellRange>>>) {
+        (self.validations, self.unmodeled)
     }
-}
-
-fn parse_rule(attributes: &XmlAttributes) -> Option<DataValidationRule> {
-    let token = |name, default| attributes.unqualified(name).unwrap_or(default);
-    let flag = |name| match attributes.unqualified(name) {
-        None | Some("0" | "false") => Some(false),
-        Some("1" | "true") => Some(true),
-        Some(_) => None,
-    };
-    let text = |name| attributes.unqualified(name).map(Box::from);
-    Some(DataValidationRule {
-        validation_type: DataValidationType::from_xlsx(token("type", "none"))?,
-        operator: DataValidationOperator::from_xlsx(token("operator", "between"))?,
-        error_style: DataValidationErrorStyle::from_xlsx(token("errorStyle", "stop"))?,
-        allow_blank: flag("allowBlank")?,
-        in_cell_dropdown: !flag("showDropDown")?,
-        show_input_message: flag("showInputMessage")?,
-        show_error_message: flag("showErrorMessage")?,
-        error_title: text("errorTitle"),
-        error: text("error"),
-        prompt_title: text("promptTitle"),
-        prompt: text("prompt"),
-    })
-}
-
-/// Parses an `sqref` list of space-separated cell and range references.
-fn parse_ranges(sqref: &str) -> Option<Vec<CellRange>> {
-    let ranges = sqref
-        .split_ascii_whitespace()
-        .map(CellRange::from_sqref_item)
-        .collect::<Option<Vec<_>>>()?;
-    (!ranges.is_empty()).then_some(ranges)
 }

@@ -203,6 +203,13 @@ These codes come from the `cellrune` crate. Interop, Python, Node.js, and MCP re
 | `validation.formula_rewrite_parse_failed` | A target-related formula could not be parsed for typed rewriting. |
 | `validation.table_range_overlap` | A table range overlaps a merged range or legacy array formula. |
 | `validation.table_range_invalid` | A table range drops its header row, leaves the table's columns, or holds no row below the header. |
+| `validation.data_validation_ranges_invalid` | A data validation rule applies to no range, or to more than 32,767 ranges. |
+| `validation.data_validation_formula_missing` | A data validation rule lacks a formula its type and operator need. |
+| `validation.data_validation_formula_invalid` | A data validation formula cannot be parsed. |
+| `validation.data_validation_text_too_long` | A data validation title or message is longer than Excel keeps. |
+| `validation.data_validation_text_invalid` | A data validation formula, title, or message holds a character XML 1.0 cannot carry. |
+| `validation.data_validation_index_out_of_range` | A data validation edit names a rule index past the sheet's rules. |
+| `validation.data_validation_overlaps_unmodeled_rule` | A data validation edit would change cells of a rule the reader could not model. |
 | `validation.defined_name_rename_shadowed` | A defined name in the other scope already uses the new name. |
 | `validation.unknown_defined_name` | No defined name has the supplied name in the supplied scope. |
 | `validation.sheet_position_out_of_range` | A sheet position is outside the tab order. |

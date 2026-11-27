@@ -1,6 +1,6 @@
 use crate::{
-    CalculationHints, CellAddress, CellFormatEdit, CellRange, CellValue, Column, DateSystem,
-    DefinedName, DefinedNameScope, FormulaText, FrozenPane, NumberFormat, PhoneticRun,
+    CalculationHints, CellAddress, CellFormatEdit, CellRange, CellValue, Column, DataValidation,
+    DateSystem, DefinedName, DefinedNameScope, FormulaText, FrozenPane, NumberFormat, PhoneticRun,
     PhoneticWriteOptions, Row, SheetId, SheetName, SheetVisibility, TableColumnId, TableColumnName,
     TableId, TableName, ValidationError,
 };
@@ -403,6 +403,48 @@ pub enum WorkbookChange {
         /// Target cell.
         address: CellAddress,
     },
+    /// Applies a data validation rule to its ranges, as Excel's Data Validation dialog does: the
+    /// cells leave every other rule, a rule left without cells goes, and the rule becomes the
+    /// sheet's last. Data validation is not a calculation input.
+    ///
+    /// Fails when the ranges reach a rule the reader could not model, whose cells the workbook
+    /// model cannot take out of it.
+    SetDataValidation {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// The rule and the ranges it applies to.
+        validation: DataValidation,
+    },
+    /// Takes the cells of `ranges` out of every data validation rule, as Excel's Clear All does,
+    /// removing a rule left without cells.
+    ///
+    /// Fails when the ranges reach a rule the reader could not model.
+    ClearDataValidations {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Cleared ranges.
+        ranges: Vec<CellRange>,
+    },
+    /// Removes the rule at `index` of [`crate::Sheet::data_validations`] with all its ranges.
+    ///
+    /// The index counts the session's order. A save writes the rules whose formulas stay on the
+    /// sheet before those naming another sheet, and keeps a rule the part already held where it
+    /// was, so a reopened workbook may list the rules in another order.
+    RemoveDataValidation {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// Zero-based rule index, counted after the earlier changes of the batch.
+        index: usize,
+    },
+    /// Replaces the sheet's whole list of data validation rules, in order. An edit inverse uses it
+    /// to bring back the rules a data validation edit changed, so the rules need only be
+    /// writable: a rule read from a file may lack a formula or exceed a length a new rule may not.
+    SetDataValidations {
+        /// Target sheet.
+        sheet_id: SheetId,
+        /// The rules the sheet holds afterwards.
+        validations: Vec<DataValidation>,
+    },
 }
 
 impl WorkbookChange {
@@ -625,6 +667,32 @@ impl WorkbookChange {
     /// Constructs a sheet-level auto-filter creation, change, or, with `None`, removal.
     pub const fn set_sheet_auto_filter(sheet_id: SheetId, range: Option<CellRange>) -> Self {
         Self::SetSheetAutoFilter { sheet_id, range }
+    }
+
+    /// Constructs a data validation rule application.
+    pub const fn set_data_validation(sheet_id: SheetId, validation: DataValidation) -> Self {
+        Self::SetDataValidation {
+            sheet_id,
+            validation,
+        }
+    }
+
+    /// Constructs a data validation clearing of `ranges`.
+    pub const fn clear_data_validations(sheet_id: SheetId, ranges: Vec<CellRange>) -> Self {
+        Self::ClearDataValidations { sheet_id, ranges }
+    }
+
+    /// Constructs the removal of the data validation rule at `index`.
+    pub const fn remove_data_validation(sheet_id: SheetId, index: usize) -> Self {
+        Self::RemoveDataValidation { sheet_id, index }
+    }
+
+    /// Constructs the replacement of a sheet's data validation rules.
+    pub const fn set_data_validations(sheet_id: SheetId, validations: Vec<DataValidation>) -> Self {
+        Self::SetDataValidations {
+            sheet_id,
+            validations,
+        }
     }
 
     /// Constructs a row insertion.

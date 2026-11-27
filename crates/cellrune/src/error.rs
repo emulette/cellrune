@@ -106,6 +106,19 @@ const MESSAGE_UNSUPPORTED_TABLE_AUTHORING_METADATA: &str =
     "table metadata cannot be preserved safely by this authoring operation";
 const MESSAGE_TABLE_TOTALS_CELL_OCCUPIED: &str =
     "a new table column requires an empty totals-row cell";
+const MESSAGE_DATA_VALIDATION_RANGES_INVALID: &str =
+    "a data validation rule must apply to between 1 and 32767 ranges";
+const MESSAGE_DATA_VALIDATION_FORMULA_MISSING: &str =
+    "a data validation rule lacks a formula its type and operator need";
+const MESSAGE_DATA_VALIDATION_FORMULA_INVALID: &str = "a data validation formula cannot be parsed";
+const MESSAGE_DATA_VALIDATION_TEXT_TOO_LONG: &str =
+    "a data validation title or message is longer than Excel keeps";
+const MESSAGE_DATA_VALIDATION_TEXT_INVALID: &str =
+    "a data validation formula, title, or message holds a character XML cannot carry";
+const MESSAGE_DATA_VALIDATION_INDEX_OUT_OF_RANGE: &str =
+    "the sheet has no data validation rule at the requested index";
+const MESSAGE_DATA_VALIDATION_OVERLAPS_UNMODELED_RULE: &str =
+    "a data validation edit would change cells of a rule the workbook model does not hold";
 const MESSAGE_SHEET_AUTO_FILTER_NOT_FOUND: &str =
     "worksheet does not declare a sheet-level auto-filter";
 const MESSAGE_SHEET_AUTO_FILTER_OVERLAPS_TABLE: &str =
@@ -317,6 +330,20 @@ pub enum ValidationErrorCode {
     TableRangeOverlap,
     /// A table range has no row below its header, or a new range moves the header row or keeps none of the table's columns.
     TableRangeInvalid,
+    /// A data validation rule applies to no range, or to more ranges than Excel keeps.
+    DataValidationRangesInvalid,
+    /// A data validation rule lacks a formula its type and operator need.
+    DataValidationFormulaMissing,
+    /// A data validation formula cannot be parsed.
+    DataValidationFormulaInvalid,
+    /// A data validation title or message is longer than Excel keeps.
+    DataValidationTextTooLong,
+    /// A data validation formula, title, or message holds a character XML 1.0 cannot carry.
+    DataValidationTextInvalid,
+    /// A data validation edit names a rule index past the sheet's rules.
+    DataValidationIndexOutOfRange,
+    /// A data validation edit would change the cells of a rule the reader could not model.
+    DataValidationOverlapsUnmodeledRule,
     /// A defined-name rename would let a name in the other scope take over references.
     DefinedNameRenameShadowed,
     /// A defined-name edit names no defined name in the supplied scope.
@@ -443,6 +470,15 @@ impl ValidationErrorCode {
             Self::FormulaRewriteParseFailed => "validation.formula_rewrite_parse_failed",
             Self::TableRangeOverlap => "validation.table_range_overlap",
             Self::TableRangeInvalid => "validation.table_range_invalid",
+            Self::DataValidationRangesInvalid => "validation.data_validation_ranges_invalid",
+            Self::DataValidationFormulaMissing => "validation.data_validation_formula_missing",
+            Self::DataValidationFormulaInvalid => "validation.data_validation_formula_invalid",
+            Self::DataValidationTextTooLong => "validation.data_validation_text_too_long",
+            Self::DataValidationTextInvalid => "validation.data_validation_text_invalid",
+            Self::DataValidationIndexOutOfRange => "validation.data_validation_index_out_of_range",
+            Self::DataValidationOverlapsUnmodeledRule => {
+                "validation.data_validation_overlaps_unmodeled_rule"
+            }
             Self::DefinedNameRenameShadowed => "validation.defined_name_rename_shadowed",
             Self::UnknownDefinedName => "validation.unknown_defined_name",
             Self::SheetPositionOutOfRange => "validation.sheet_position_out_of_range",
@@ -861,6 +897,55 @@ pub enum ValidationError {
     },
     /// A table range has no row below its header, or a new range moves the header row or keeps none of the table's columns.
     TableRangeInvalid,
+    /// A data validation rule applies to no range, or to more ranges than Excel keeps.
+    DataValidationRangesInvalid {
+        /// Target sheet.
+        sheet_id: u32,
+        /// Number of ranges supplied.
+        count: usize,
+    },
+    /// A data validation rule lacks a formula its type and operator need.
+    DataValidationFormulaMissing {
+        /// Target sheet.
+        sheet_id: u32,
+        /// The missing formula, 1 or 2.
+        slot: u8,
+    },
+    /// A data validation formula cannot be parsed.
+    DataValidationFormulaInvalid {
+        /// Target sheet.
+        sheet_id: u32,
+        /// The rejected formula, 1 or 2.
+        slot: u8,
+    },
+    /// A data validation title or message is longer than Excel keeps.
+    DataValidationTextTooLong {
+        /// Target sheet.
+        sheet_id: u32,
+        /// OOXML attribute holding the text.
+        attribute: &'static str,
+        /// Excel's limit in UTF-16 code units.
+        limit: usize,
+    },
+    /// A data validation formula, title, or message holds a character XML 1.0 cannot carry.
+    DataValidationTextInvalid {
+        /// Target sheet.
+        sheet_id: u32,
+        /// OOXML attribute or element holding the text.
+        attribute: &'static str,
+    },
+    /// A data validation edit names a rule index past the sheet's rules.
+    DataValidationIndexOutOfRange {
+        /// Target sheet.
+        sheet_id: u32,
+        /// Rejected rule index.
+        index: usize,
+    },
+    /// A data validation edit would change the cells of a rule the reader could not model.
+    DataValidationOverlapsUnmodeledRule {
+        /// Target sheet.
+        sheet_id: u32,
+    },
     /// A defined-name rename would let a name in the other scope take over references.
     DefinedNameRenameShadowed {
         /// Rejected new name.
@@ -1058,6 +1143,27 @@ impl ValidationError {
             }
             Self::TableRangeOverlap { .. } => ValidationErrorCode::TableRangeOverlap,
             Self::TableRangeInvalid => ValidationErrorCode::TableRangeInvalid,
+            Self::DataValidationRangesInvalid { .. } => {
+                ValidationErrorCode::DataValidationRangesInvalid
+            }
+            Self::DataValidationFormulaMissing { .. } => {
+                ValidationErrorCode::DataValidationFormulaMissing
+            }
+            Self::DataValidationFormulaInvalid { .. } => {
+                ValidationErrorCode::DataValidationFormulaInvalid
+            }
+            Self::DataValidationTextTooLong { .. } => {
+                ValidationErrorCode::DataValidationTextTooLong
+            }
+            Self::DataValidationTextInvalid { .. } => {
+                ValidationErrorCode::DataValidationTextInvalid
+            }
+            Self::DataValidationIndexOutOfRange { .. } => {
+                ValidationErrorCode::DataValidationIndexOutOfRange
+            }
+            Self::DataValidationOverlapsUnmodeledRule { .. } => {
+                ValidationErrorCode::DataValidationOverlapsUnmodeledRule
+            }
             Self::DefinedNameRenameShadowed { .. } => {
                 ValidationErrorCode::DefinedNameRenameShadowed
             }
@@ -1398,6 +1504,41 @@ impl fmt::Display for ValidationError {
                 "{MESSAGE_TABLE_RANGE_OVERLAP}: sheet {sheet_id}, row {row}, column {column}"
             ),
             Self::TableRangeInvalid => formatter.write_str(MESSAGE_TABLE_RANGE_INVALID),
+            Self::DataValidationRangesInvalid { sheet_id, count } => write!(
+                formatter,
+                "{MESSAGE_DATA_VALIDATION_RANGES_INVALID}: sheet {sheet_id}, {count} ranges"
+            ),
+            Self::DataValidationFormulaMissing { sheet_id, slot } => write!(
+                formatter,
+                "{MESSAGE_DATA_VALIDATION_FORMULA_MISSING}: sheet {sheet_id}, formula{slot}"
+            ),
+            Self::DataValidationFormulaInvalid { sheet_id, slot } => write!(
+                formatter,
+                "{MESSAGE_DATA_VALIDATION_FORMULA_INVALID}: sheet {sheet_id}, formula{slot}"
+            ),
+            Self::DataValidationTextTooLong {
+                sheet_id,
+                attribute,
+                limit,
+            } => write!(
+                formatter,
+                "{MESSAGE_DATA_VALIDATION_TEXT_TOO_LONG}: sheet {sheet_id}, {attribute} over {limit}"
+            ),
+            Self::DataValidationTextInvalid {
+                sheet_id,
+                attribute,
+            } => write!(
+                formatter,
+                "{MESSAGE_DATA_VALIDATION_TEXT_INVALID}: sheet {sheet_id}, {attribute}"
+            ),
+            Self::DataValidationIndexOutOfRange { sheet_id, index } => write!(
+                formatter,
+                "{MESSAGE_DATA_VALIDATION_INDEX_OUT_OF_RANGE}: sheet {sheet_id}, index {index}"
+            ),
+            Self::DataValidationOverlapsUnmodeledRule { sheet_id } => write!(
+                formatter,
+                "{MESSAGE_DATA_VALIDATION_OVERLAPS_UNMODELED_RULE}: sheet {sheet_id}"
+            ),
             Self::DefinedNameRenameShadowed { name } => {
                 write!(formatter, "{MESSAGE_DEFINED_NAME_RENAME_SHADOWED}: {name}")
             }
@@ -1798,6 +1939,34 @@ mod tests {
             (
                 ValidationErrorCode::TableRangeInvalid,
                 "validation.table_range_invalid",
+            ),
+            (
+                ValidationErrorCode::DataValidationRangesInvalid,
+                "validation.data_validation_ranges_invalid",
+            ),
+            (
+                ValidationErrorCode::DataValidationFormulaMissing,
+                "validation.data_validation_formula_missing",
+            ),
+            (
+                ValidationErrorCode::DataValidationFormulaInvalid,
+                "validation.data_validation_formula_invalid",
+            ),
+            (
+                ValidationErrorCode::DataValidationTextTooLong,
+                "validation.data_validation_text_too_long",
+            ),
+            (
+                ValidationErrorCode::DataValidationTextInvalid,
+                "validation.data_validation_text_invalid",
+            ),
+            (
+                ValidationErrorCode::DataValidationIndexOutOfRange,
+                "validation.data_validation_index_out_of_range",
+            ),
+            (
+                ValidationErrorCode::DataValidationOverlapsUnmodeledRule,
+                "validation.data_validation_overlaps_unmodeled_rule",
             ),
             (
                 ValidationErrorCode::DefinedNameRenameShadowed,
