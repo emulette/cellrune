@@ -9,6 +9,7 @@ use cellrune::{
 use super::recalculation_write_support::{archive_parts, part_text};
 use crate::support::generated_xlsx::{
     generated_data_validation_edit_fixture, generated_data_validation_workbook,
+    generated_lenient_validation_fixture,
 };
 
 fn range(value: &str) -> CellRange {
@@ -404,4 +405,38 @@ fn an_unmodeled_rule_moves_with_inserted_rows() {
         xml.contains(r#"<dataValidation type="bogus" sqref="F2:F4"/>"#),
         "{xml}"
     );
+}
+
+#[test]
+fn rules_another_tool_wrote_come_back_with_the_inverse() {
+    let source = generated_lenient_validation_fixture();
+    let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+    let rules_sheet = |draft: &WorkbookDraft| {
+        draft
+            .workbook()
+            .sheet_by_name("Rules")
+            .expect("Rules")
+            .data_validations()
+            .to_vec()
+    };
+    for edit in [
+        |sheet| WorkbookChange::remove_data_validation(sheet, 0),
+        |sheet| WorkbookChange::clear_data_validations(sheet, ranges(&["A1:C1"])),
+        |sheet| WorkbookChange::set_data_validation(sheet, list(&["Z1"], "\"x\"")),
+    ] {
+        let mut draft = WorkbookDraft::from_document(&document);
+        let original = rules_sheet(&draft);
+        assert_eq!(original.len(), 2);
+        let sheet = draft.workbook().sheet_by_name("Rules").expect("Rules").id();
+        let receipt = draft
+            .apply_changes(EditBatch::new([edit(sheet)]))
+            .expect("edit");
+        let inverse = receipt.inverse().expect("an inverse").clone();
+        draft
+            .apply_changes(EditBatch::new(inverse.changes().to_vec()))
+            .expect("undo");
+        assert_eq!(rules_sheet(&draft), original);
+        let sheet_part = |bytes: &[u8]| archive_parts(bytes)["xl/worksheets/sheet1.xml"].clone();
+        assert_eq!(sheet_part(&minimal_write(&draft)), sheet_part(&source));
+    }
 }

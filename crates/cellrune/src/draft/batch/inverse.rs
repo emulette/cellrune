@@ -233,23 +233,27 @@ impl Recreated {
     }
 }
 
-/// Builds the inverse of the batch that turned `before` into `after`. Returns `None` when the
-/// structural edits that undo the batch's own cannot be applied to its result, as when a later
-/// change filled the rows a deletion freed.
 /// Returns the inverse of a batch of data validation edits alone, which only change the rule lists
 /// of the sheets in `validation_sheets`: setting those lists back undoes it, without comparing
 /// the rest of the workbook.
-pub(super) fn validation_inverse(before: &WorkbookDraft, seed: &InverseSeed) -> EditInverse {
+pub(super) fn validation_inverse(
+    before: &WorkbookDraft,
+    after: &WorkbookDraft,
+    seed: &InverseSeed,
+) -> EditInverse {
     EditInverse {
         changes: seed
             .validation_sheets
             .iter()
             .filter_map(|sheet_id| {
                 let sheet = before.workbook().sheet_by_id(*sheet_id)?;
-                Some(WorkbookChange::set_data_validations(
-                    *sheet_id,
-                    sheet.data_validations().to_vec(),
-                ))
+                let current = after.workbook().sheet_by_id(*sheet_id)?;
+                (current.data_validations() != sheet.data_validations()).then(|| {
+                    WorkbookChange::set_data_validations(
+                        *sheet_id,
+                        sheet.data_validations().to_vec(),
+                    )
+                })
             })
             .collect(),
         unrestored: Vec::new(),
@@ -267,6 +271,9 @@ pub(super) const fn is_validation_change(change: &WorkbookChange) -> bool {
     )
 }
 
+/// Builds the inverse of the batch that turned `before` into `after`. Returns `None` when the
+/// structural edits that undo the batch's own cannot be applied to its result, as when a later
+/// change filled the rows a deletion freed.
 pub(super) fn edit_inverse(
     before: &WorkbookDraft,
     after: &WorkbookDraft,

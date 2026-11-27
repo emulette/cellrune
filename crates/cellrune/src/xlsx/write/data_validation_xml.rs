@@ -7,12 +7,14 @@ use super::serialization::{escape_attribute, escape_text};
 use super::table_patch::range_text;
 use super::{WriteLimits, XlsxWriteError};
 use crate::calculation::formula_references::formula_references;
-use crate::workbook::{DataValidationRule, parse_sqref};
+use crate::workbook::{DataValidationRule, is_xml_char, parse_sqref};
 use crate::xlsx::package::PartPath;
 use crate::{
     CellRange, DataValidation, DataValidationErrorStyle, DataValidationOperator,
     DataValidationType, Sheet, SheetName,
 };
+use quick_xml::XmlVersion;
+use quick_xml::events::Event;
 
 const MAIN_NAMESPACE: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const X14_NAMESPACE: &str = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
@@ -338,14 +340,14 @@ fn element_validation(
         } else {
             holder
         };
-        let Some(text) = holder.text(part)? else {
+        let Some(text) = element_text(holder) else {
             return Ok(None);
         };
         formulas[slot] = Some(text.into_boxed_str());
     }
     let sqref = if extension {
         match single("sqref") {
-            Ok(Some(holder)) => holder.text(part)?,
+            Ok(Some(holder)) => element_text(holder),
             _ => return Ok(None),
         }
     } else {
@@ -358,6 +360,40 @@ fn element_validation(
     Ok(Some(DataValidation::from_xlsx(
         ranges, rule, formula1, formula2,
     )))
+}
+
+/// Returns an element's text as the reader collects it: the text of its children too, without
+/// comments or processing instructions, or `None` for a reference the reader cannot decode, which
+/// leaves the rule unmodeled.
+fn element_text(element: &XmlElement) -> Option<String> {
+    let mut text = String::new();
+    for child in &element.children {
+        match child {
+            XmlNode::Element(inner) => text.push_str(&element_text(inner)?),
+            XmlNode::Other(Event::Text(content)) => {
+                text.push_str(&content.xml_content(XmlVersion::Implicit1_0));
+            }
+            XmlNode::Other(Event::CData(content)) => {
+                text.push_str(&content.xml_content(XmlVersion::Implicit1_0));
+            }
+            XmlNode::Other(Event::GeneralRef(reference)) => {
+                match reference.resolve_char_ref().ok()? {
+                    Some(character) if is_xml_char(character) => text.push(character),
+                    Some(_) => return None,
+                    None => text.push(match reference.as_ref() {
+                        "lt" => '<',
+                        "gt" => '>',
+                        "amp" => '&',
+                        "apos" => '\'',
+                        "quot" => '"',
+                        _ => return None,
+                    }),
+                }
+            }
+            XmlNode::Other(_) => {}
+        }
+    }
+    Some(text)
 }
 
 /// Applies the actions of the container's slots, then sets its `count`.

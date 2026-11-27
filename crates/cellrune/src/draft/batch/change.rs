@@ -436,9 +436,11 @@ pub enum WorkbookChange {
         /// Zero-based rule index, counted after the earlier changes of the batch.
         index: usize,
     },
-    /// Replaces the sheet's whole list of data validation rules, in order. An edit inverse uses it
-    /// to bring back the rules a data validation edit changed, so the rules need only be
-    /// writable: a rule read from a file may lack a formula or exceed a length a new rule may not.
+    /// Replaces the sheet's whole list of data validation rules, in order, as given: it does not
+    /// take cells out of other rules. An edit inverse uses it to bring back the rules a data
+    /// validation edit changed, so a rule the sheet holds or its file held, whatever its ranges,
+    /// need only be writable, as such a rule may lack a formula or exceed a length a new rule may
+    /// not; any other rule is checked as [`Self::SetDataValidation`] checks it.
     SetDataValidations {
         /// Target sheet.
         sheet_id: SheetId,

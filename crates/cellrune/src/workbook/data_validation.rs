@@ -7,6 +7,9 @@ const MAX_PROMPT_TITLE: usize = 32;
 const MAX_PROMPT: usize = 255;
 const MAX_ERROR_TITLE: usize = 32;
 const MAX_ERROR: usize = 224;
+/// Excel's length limit for the items of a list rule written as a quoted literal, commas
+/// included, in UTF-16 code units; Excel drops a longer list when it opens the file.
+const MAX_LIST_LITERAL: usize = 255;
 
 /// The kind of value a data validation rule accepts, the OOXML `type` attribute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -202,7 +205,7 @@ pub(crate) fn parse_sqref(sqref: &str) -> Option<Vec<CellRange>> {
 
 /// Whether XML 1.0 carries `character`: a tab, line feed, carriage return, or any character from
 /// space on except U+FFFE and U+FFFF.
-const fn is_xml_char(character: char) -> bool {
+pub(crate) const fn is_xml_char(character: char) -> bool {
     matches!(character, '\t' | '\n' | '\r')
         || (character >= ' ' && character != '\u{FFFE}' && character != '\u{FFFF}')
 }
@@ -313,8 +316,8 @@ impl DataValidation {
     }
 
     /// Checks that the rule can be written: it applies to a range, and its formulas, titles, and
-    /// messages hold only characters XML 1.0 carries. A rule read from a file passes, whatever
-    /// the tool that wrote it allowed.
+    /// messages hold only characters XML 1.0 carries. A rule read from a well-formed file passes,
+    /// whatever limits the tool that wrote it ignored.
     pub(crate) fn check_writable(&self, sheet_id: u32) -> Result<(), ValidationError> {
         if self.ranges.is_empty() {
             return Err(ValidationError::DataValidationRangesInvalid { sheet_id, count: 0 });
@@ -376,6 +379,19 @@ impl DataValidation {
                 }
                 _ => {}
             }
+        }
+        if self.rule.validation_type == DataValidationType::List
+            && let Some(items) = self
+                .formula1
+                .as_deref()
+                .and_then(|formula| formula.strip_prefix('"')?.strip_suffix('"'))
+            && items.encode_utf16().count() > MAX_LIST_LITERAL
+        {
+            return Err(ValidationError::DataValidationTextTooLong {
+                sheet_id,
+                attribute: "formula1",
+                limit: MAX_LIST_LITERAL,
+            });
         }
         for (attribute, text, limit) in [
             ("promptTitle", &self.rule.prompt_title, MAX_PROMPT_TITLE),

@@ -1213,8 +1213,12 @@ impl WorkbookDraft {
                     sheet_id,
                     validations,
                 } => {
+                    let read = source_workbook
+                        .and_then(|workbook| workbook.sheet_by_id(*sheet_id))
+                        .map(Sheet::data_validations)
+                        .unwrap_or_default();
                     let sheet = sheet_by_id_mut(&mut sheets, *sheet_id)?;
-                    if set_data_validations(sheet, validations)? {
+                    if set_data_validations(sheet, validations, read)? {
                         inverse_seed.validation_sheets.insert(*sheet_id);
                     }
                 }
@@ -1321,7 +1325,7 @@ impl WorkbookDraft {
         let inverse = if !with_inverse {
             None
         } else if batch.changes().iter().all(is_validation_change) {
-            Some(Box::new(validation_inverse(self, &inverse_seed)))
+            Some(Box::new(validation_inverse(self, &next, &inverse_seed)))
         } else {
             edit_inverse(self, &next, inverse_seed, rewrite_budget.cancellation())?.map(Box::new)
         };

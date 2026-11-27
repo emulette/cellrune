@@ -271,33 +271,36 @@ fn the_inverse_brings_back_every_rule_in_order() {
 }
 
 #[test]
-fn rules_another_tool_wrote_are_set_back_by_the_inverse() {
-    // A whole-number rule between bounds that names only its first bound, which a new rule could
-    // not be, as a file may hold it.
+fn a_replaced_list_checks_the_rules_the_sheet_did_not_hold() {
+    let (mut draft, sheet) = draft_with(vec![list(&["A1"], "Names")]);
     let partial =
         DataValidation::new(ranges(&["B1"]), DataValidationType::Whole).with_formula1("1");
-    let long_title =
-        list(&["C1"], "Names").with_input_message(true, Some("t".repeat(40).as_str()), None);
-    let (mut draft, sheet) = draft_with(vec![partial.clone(), long_title.clone()]);
-    for edit in [
-        WorkbookChange::remove_data_validation(sheet, 0),
-        WorkbookChange::clear_data_validations(sheet, ranges(&["A1:C1"])),
-        WorkbookChange::set_data_validation(sheet, list(&["Z1"], "Names")),
-    ] {
-        let receipt = draft.apply_changes(EditBatch::new([edit])).expect("edit");
-        let inverse = receipt.inverse().expect("an inverse").clone();
+    assert_eq!(
         draft
-            .apply_changes(EditBatch::new(inverse.changes().to_vec()))
-            .expect("undo");
-        assert_eq!(
-            draft
-                .workbook()
-                .sheet_by_id(sheet)
-                .expect("sheet")
-                .data_validations(),
-            [partial.clone(), long_title.clone()]
-        );
-    }
+            .apply_changes(EditBatch::new([WorkbookChange::set_data_validations(
+                sheet,
+                vec![list(&["A1:A2"], "Names"), partial],
+            )]))
+            .expect_err("a new rule lacking its second bound"),
+        ValidationError::DataValidationFormulaMissing {
+            sheet_id: sheet.get(),
+            slot: 2,
+        }
+    );
+    let long_list = format!("\"{}\"", "x".repeat(256));
+    assert_eq!(
+        draft
+            .apply_changes(EditBatch::new([WorkbookChange::set_data_validation(
+                sheet,
+                list(&["C1"], &long_list),
+            )]))
+            .expect_err("a list literal longer than Excel keeps"),
+        ValidationError::DataValidationTextTooLong {
+            sheet_id: sheet.get(),
+            attribute: "formula1",
+            limit: 255,
+        }
+    );
 }
 
 #[test]

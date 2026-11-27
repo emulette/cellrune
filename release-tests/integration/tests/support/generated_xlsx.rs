@@ -1116,6 +1116,39 @@ pub fn generated_data_validation_edit_fixture() -> Vec<u8> {
     )
 }
 
+/// One sheet `Rules` holding rules other tools write that CellRune would not accept as new ones:
+/// a whole-number rule between bounds that names only its first bound on B1, and a list rule on C1
+/// whose input title is 40 characters long.
+pub fn generated_lenient_validation_fixture() -> Vec<u8> {
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Rules" sheetId="1" r:id="rId1"/><sheet name="Lists" sheetId="2" r:id="rId2"/></sheets>
+</workbook>"#;
+    let rules = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <dataValidations count="2">
+    <dataValidation type="whole" sqref="B1"><formula1>1</formula1></dataValidation>
+    <dataValidation type="list" showInputMessage="1" promptTitle="tttttttttttttttttttttttttttttttttttttttt" sqref="C1"><formula1>"a,b"</formula1></dataValidation>
+  </dataValidations>
+</worksheet>"#;
+    let lists = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
+            ("xl/styles.xml", STYLES),
+            ("xl/worksheets/sheet1.xml", rules),
+            ("xl/worksheets/sheet2.xml", lists),
+        ],
+        None,
+    )
+}
+
 /// One sheet `Styled` whose styles exercise every part of the format model: style 1 is bold red
 /// Arial 12 on solid yellow with thin black side borders, centered and wrapped; style 2 has a
 /// gradient fill and a custom number format; style 3 aligns top with indent 2 and 45-degree text.

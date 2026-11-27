@@ -76,3 +76,28 @@ fn an_extension_rule_inside_a_compatibility_wrapper_is_matched_where_it_is() {
         "{patched}"
     );
 }
+
+#[test]
+fn rules_are_read_as_the_reader_reads_them() {
+    let whole = DataValidation::new(vec![cell("B2")], DataValidationType::Whole)
+        .with_formula1("1")
+        .with_formula2("9");
+    let commented = r#"<dataValidation type="whole" sqref="B2"><formula1><!--c-->1</formula1><formula2>9</formula2></dataValidation>"#;
+    let forbidden =
+        r#"<dataValidation type="custom" sqref="E1"><formula1>A1&#x1;</formula1></dataValidation>"#;
+    let unknown =
+        r#"<dataValidation type="custom" sqref="E2"><formula1>&bogus;</formula1></dataValidation>"#;
+    let body = format!(
+        r#"<sheetData/><dataValidations count="3">{commented}{forbidden}{unknown}</dataValidations>"#
+    );
+    // The reader models the commented rule and leaves the other two, which it cannot decode,
+    // unmodeled.
+    let patched = patch(&body, &sheet(vec![whole, list("A1", "\"a\"")])).expect("changed");
+    assert_eq!(patched.matches(r#"sqref="B2""#).count(), 1, "{patched}");
+    assert!(patched.contains(forbidden), "{patched}");
+    assert!(patched.contains(unknown), "{patched}");
+    assert!(
+        patched.contains(r#"<dataValidations count="4">"#),
+        "{patched}"
+    );
+}

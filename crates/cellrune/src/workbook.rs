@@ -19,7 +19,7 @@ pub use auto_filter::SheetAutoFilter;
 pub use data_validation::{
     DataValidation, DataValidationErrorStyle, DataValidationOperator, DataValidationType,
 };
-pub(crate) use data_validation::{DataValidationRule, parse_sqref};
+pub(crate) use data_validation::{DataValidationRule, is_xml_char, parse_sqref};
 pub(crate) use grid_transform::grid_metadata;
 pub(crate) use new_cell_styles::NewCellStyles;
 pub(crate) use sheet_tabs::{NonWorksheetTab, NonWorksheetTabs};

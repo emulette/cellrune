@@ -46,14 +46,25 @@ pub(super) fn remove_data_validation(
 
 /// Replaces the sheet's rules with `validations`. Returns whether they changed.
 ///
-/// The rules are only checked to be writable, since an edit inverse sets back rules read from a
-/// file that a new rule would not be allowed to be.
+/// A rule the sheet holds, or its source sheet `read` held, whatever its ranges, need only be
+/// writable, since an edit inverse sets back rules read from a file that a new rule would not be
+/// allowed to be; any other rule is checked as a new one.
 pub(super) fn set_data_validations(
     sheet: &mut Sheet,
     validations: &[DataValidation],
+    read: &[DataValidation],
 ) -> Result<bool, ValidationError> {
     for validation in validations {
-        validation.check_writable(sheet.id().get())?;
+        let held = sheet
+            .data_validations()
+            .iter()
+            .chain(read)
+            .any(|held| held.same_rule(validation));
+        if held {
+            validation.check_writable(sheet.id().get())?;
+        } else {
+            validation.check(sheet.id().get())?;
+        }
     }
     Ok(replace(sheet, validations.to_vec()))
 }
