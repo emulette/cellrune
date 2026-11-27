@@ -1427,7 +1427,10 @@ fn incremental_unsafe_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CellAddress, CellValue, FiniteNumber, FormulaText, SheetId, WorkbookChange};
+    use crate::{
+        CalculationCellResult, CellAddress, CellValue, ExcelError, FiniteNumber, FormulaText,
+        SheetId, SheetName, WorkbookChange,
+    };
 
     fn address(value: &str) -> CellAddress {
         CellAddress::from_a1(value).expect("valid test address")
@@ -1495,6 +1498,129 @@ mod tests {
             )
             .expect("one-dirty calculation");
         assert_eq!(one_dirty.evaluated_count(), 1);
+    }
+
+    #[test]
+    fn indirect_text_follows_sheets_added_renamed_and_deleted() {
+        let sheet = SheetId::new(1).expect("valid default sheet ID");
+        let data = SheetId::new(2).expect("added sheet ID");
+        let formula = |text: &str| FormulaText::from_xlsx(text).expect("valid test formula");
+        let mut changes = vec![
+            WorkbookChange::set_cell_value(
+                sheet,
+                address("B1"),
+                CellValue::Text("Data!A1".to_owned()),
+            ),
+            WorkbookChange::set_cell_formula(sheet, address("C1"), formula("INDIRECT(B1)")),
+            WorkbookChange::set_cell_formula(sheet, address("D1"), formula("C1+1")),
+        ];
+        // Unrelated formulas keep the sheet edits below the share of formulas that compiles the
+        // workbook in full, so the readers are evaluated incrementally.
+        for row in 1..=6 {
+            changes.push(WorkbookChange::set_cell_formula(
+                sheet,
+                CellAddress::from_indices(row, 5).expect("filler cell"),
+                formula(&format!("A{row}+1")),
+            ));
+        }
+        let mut session = WorkbookCalculationSession::create();
+        session
+            .apply_changes(0, EditBatch::new(changes))
+            .expect("initial test workbook");
+        session
+            .recalculate(
+                RecalculationMode::Auto,
+                CalculationOptions::default(),
+                CancellationToken::new(),
+            )
+            .expect("initial calculation");
+        let results = |session: &WorkbookCalculationSession| {
+            ["C1", "D1"].map(|cell| {
+                session
+                    .calculation()
+                    .and_then(|snapshot| {
+                        snapshot.cell(CalculationCellId::new(sheet, address(cell)))
+                    })
+                    .cloned()
+            })
+        };
+        let recalculate = |session: &mut WorkbookCalculationSession, change| {
+            session
+                .apply_changes(
+                    session.workbook().semantic_revision(),
+                    EditBatch::new([change]),
+                )
+                .expect("workbook edit");
+            let mode = session
+                .recalculate(
+                    RecalculationMode::Auto,
+                    CalculationOptions::default(),
+                    CancellationToken::new(),
+                )
+                .expect("incremental calculation")
+                .mode();
+            let incremental = results(session);
+            session
+                .recalculate(
+                    RecalculationMode::Full,
+                    CalculationOptions::default(),
+                    CancellationToken::new(),
+                )
+                .expect("full calculation");
+            assert_eq!(incremental, results(session));
+            (mode, incremental)
+        };
+        let value = |result: CellValue| Some(CalculationCellResult::Value(result));
+        let missing = [
+            value(CellValue::Error(ExcelError::Reference)),
+            value(CellValue::Error(ExcelError::Reference)),
+        ];
+        let found = |number_value: f64| {
+            [
+                value(number(number_value)),
+                value(number(number_value + 1.0)),
+            ]
+        };
+        let incremental = CalculationExecutionMode::Incremental;
+
+        let added = recalculate(
+            &mut session,
+            WorkbookChange::add_sheet(SheetName::new("Data").expect("sheet name")),
+        );
+        assert_eq!(
+            added,
+            (incremental, found(0.0)),
+            "adding the sheet resolves the text"
+        );
+        let edited = recalculate(
+            &mut session,
+            WorkbookChange::set_cell_value(data, address("A1"), number(5.0)),
+        );
+        assert_eq!(
+            edited,
+            (incremental, found(5.0)),
+            "the added sheet's cell is read"
+        );
+        let renamed = recalculate(
+            &mut session,
+            WorkbookChange::rename_sheet(data, SheetName::new("Other").expect("sheet name")),
+        );
+        assert_eq!(
+            renamed,
+            (incremental, missing.clone()),
+            "renaming the sheet away"
+        );
+        let restored = recalculate(
+            &mut session,
+            WorkbookChange::rename_sheet(data, SheetName::new("Data").expect("sheet name")),
+        );
+        assert_eq!(
+            restored,
+            (incremental, found(5.0)),
+            "renaming the sheet back"
+        );
+        let (_, deleted) = recalculate(&mut session, WorkbookChange::delete_sheet(data));
+        assert_eq!(deleted, missing, "deleting the sheet loses the text");
     }
 
     #[test]

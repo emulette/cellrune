@@ -36,8 +36,9 @@ pub(in crate::calculation) fn expression_references(root: &Expr) -> FormulaRefer
 }
 
 impl FormulaReferences {
-    /// Whether the formula names a sheet whose lookup key is in `sheets`, or calls a function that
-    /// reads sheet names or the number of sheets, which adding or renaming a sheet changes.
+    /// Whether the formula names a sheet whose lookup key is in `sheets`, or calls a function whose
+    /// result adding, renaming, or deleting a sheet can change: one that reads sheet names or the
+    /// number of sheets, or `INDIRECT`, which names sheets in text.
     pub(crate) fn reads_sheet_names(&self, sheets: &BTreeSet<String>) -> bool {
         self.sheets.iter().any(|sheet| {
             crate::SheetName::new(sheet.as_str())
@@ -45,7 +46,7 @@ impl FormulaReferences {
         }) || self.names.iter().any(|name| {
             matches!(
                 super::functions::normalize_name(name).as_str(),
-                "SHEET" | "SHEETS" | "CELL"
+                "SHEET" | "SHEETS" | "CELL" | "INDIRECT"
             )
         })
     }
