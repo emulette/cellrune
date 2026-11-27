@@ -10,6 +10,42 @@ inventories, and measurements belong in the linked documentation rather than in 
 
 ## [Unreleased]
 
+### Added
+
+- Data validation rules can be written. `DataValidation::new` and its `with_` methods build a rule
+  of any OOXML type, and `WorkbookChange::set_data_validation`, `clear_data_validations`,
+  `remove_data_validation`, and `set_data_validations` edit a sheet's rules with the
+  one-rule-per-cell semantics of Excel's Data Validation dialog. The edits keep the semantic
+  revision and carry an edit inverse. A new rule must have the formulas its type needs, formulas
+  that parse, and titles, messages, and list literals within Excel's lengths; an edit reaching a rule
+  the reader could not model is refused. Saves write rules naming another sheet or workbook in the
+  Excel 2010 extension, keep the markup of rules they keep, and a minimal write changes only the
+  edited worksheet part. Edit schema v2 carries the same edits on the interop, Python, Node.js, and
+  MCP surfaces, taking a rule in the shape `data_validations` returns. The validation error codes
+  `validation.data_validation_ranges_invalid`, `_formula_missing`, `_formula_invalid`,
+  `_text_too_long`, `_text_invalid`, `_index_out_of_range`, and `_overlaps_unmodeled_rule` are new.
+- Targeted calculation in a session can take the saved result of a precedent formula it cannot
+  calculate: `WorkbookCalculationSession::calculate_targets_with` and
+  `prepare_target_calculation_with` with `UncalculablePrecedents::SavedResult`
+  (`uncalculable_precedents="saved_result"` in Python, `uncalculablePrecedents` in Node.js, and
+  `uncalculable_precedents` in MCP). Only a saved result that is still current is taken, and
+  `TargetCalculationResult::saved_precedents` (`saved_precedents` on the surfaces) names the
+  precedents a value went through. The default is unchanged.
+- `WriteOptions::with_saved_result_mark` (`saved_result_mark`/`savedResultMark` on the surfaces)
+  marks a minimal write's `workbook.xml` with a digest of the package, so that a targeted
+  calculation of the file opened again takes the saved results the write kept until another tool
+  changes the file. The default output is unchanged.
+
+### Fixed
+
+- In an incremental session, adding, renaming, or deleting a sheet recalculates the formulas whose
+  `INDIRECT` text can name it, which kept their earlier result.
+
+### Changed
+
+- A formula edit recompiled in place updates the impact index for the edited formulas instead of
+  building it again, so the edit takes about a third less time on a workbook of 120,000 formulas.
+
 ## [0.2.0] - 2026-10-27
 
 ### Changed

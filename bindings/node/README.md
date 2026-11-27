@@ -139,8 +139,11 @@ runs, so do not edit it until the returned Promise settles.
 `openPath`/`fromBytes` accept `readLimits` and `calculate`/`recalculate`/`previewChanges` accept
 `calculationLimits` to change individual default limits, and `scanCapabilities()` pages through the
 static per-formula support report. `dataValidations(sheet, { offset, limit })` pages through a
-sheet's read-only data validation rules, and `hyperlinks` and `comments` through its hyperlinks and
-cell comments. `readFormats(sheet, start, end, { offset, limit })` reads
+sheet's data validation rules, and `hyperlinks` and `comments` through its hyperlinks and
+cell comments. `applyChangesV2` takes a rule in the shape `dataValidations` returns:
+`setDataValidation` applies it to its ranges, taking those cells out of every other rule,
+`clearDataValidations` takes ranges out of every rule, `removeDataValidation` removes the rule at an
+index, and `setDataValidations` replaces a sheet's rules; they keep the semantic revision. `readFormats(sheet, start, end, { offset, limit })` reads
 cell fonts, fills, borders, and alignments with column widths and row heights, and
 `applyChangesV2` takes `setCellFormat`, `setColumnWidth`, and `setRowHeight` changes; a
 `setCellFormat` font, border, or alignment sets only the properties it gives, and its fill replaces

@@ -33,7 +33,8 @@ cellrune = "0.2.0"
   columns, and validated worksheet-owned Excel
   tables, including stable table and column IDs, complete filter/sort/formula/style metadata, and
   case-insensitive lookup indexes;
-- reads every worksheet data validation rule, including Excel 2010 extension rules, and worksheet
+- reads and writes every worksheet data validation rule, including Excel 2010 extension rules,
+  with the one-rule-per-cell edits of Excel's Data Validation dialog, and reads worksheet
   hyperlinks and cell comments as read-only metadata;
 - imports and exports one sheet as RFC 4180 CSV under a documented, lossless value rule;
 - reads and writes a minimal cell formatting model (font, fill, border, alignment) with column
@@ -272,8 +273,16 @@ Defaults bound input targets to 1,024, returned cells to 10,000, and evaluator i
 100,000; dynamic retries count toward the work budget. Request limits can be set with `limits`.
 Known array followers calculate their entire anchor. For an undeclared spill whose owner has
 never been calculated, include its anchor in the request; an unknown follower alone cannot locate
-an arbitrary formula elsewhere in the workbook. Saved formula results are never used as current
-calculation values. See [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt) for
+an arbitrary formula elsewhere in the workbook. By default saved formula results are never used as
+current calculation values. A session request may opt in with
+`UncalculablePrecedents::SavedResult` (`uncalculable_precedents="saved_result"` in Python,
+`uncalculablePrecedents: "saved_result"` in Node.js and MCP): a precedent formula CellRune cannot
+calculate, such as one calling an unsupported function, then gives the requested cells its saved
+result while that result is current, that is, while the file is not in manual calculation mode,
+does not ask its host to recalculate on open, and no edit of the session reaches the precedent; a
+volatile formula, or one on a sheet added or imported in the session, gives none. Calculable precedents are calculated
+either way, and each requested cell names the precedents its value took a saved result from in
+`saved_precedents`. See [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt) for
 the complete Rust types and transport contract.
 
 Undeclared spills outside the dependency scope are not discovered. Use declared spill ranges or
@@ -398,7 +407,7 @@ reaches every surface:
 | Sheet import from another open workbook (`import_sheet`, Node.js `importSheet`, MCP `workbook_import_sheet`) | yes | yes | yes | yes |
 | Row and column insertion, deletion, and moves, range moves and copies, and the inverse changes in the receipt of these and of sheet, defined-name, table, and autoFilter edits | yes | yes | yes | yes |
 | Locale profile and number-format display text | yes | yes | yes | yes |
-| Data validation rules, hyperlinks, and comments (read-only) | yes | yes | yes | yes |
+| Data validation rules (read and edit), hyperlinks, and comments (read-only) | yes | yes | yes | yes |
 | Cell formats, column widths, and row heights (read and edit) | yes | yes | yes | yes |
 | CSV import and export of one sheet | yes | yes | yes | yes |
 | Adjustable read and calculation limits | yes | yes | yes | defaults only |
@@ -509,7 +518,11 @@ try {
 }
 ```
 
-`edits_to_bytes`/`editsToBytes` return the same package in memory. A workbook created rather than
+`edits_to_bytes`/`editsToBytes` return the same package in memory. With `saved_result_mark`
+(`savedResultMark` in Node.js and MCP), the save also marks `workbook.xml` with a digest of the
+package when the source's saved results were current, so that a targeted calculation of the file
+opened again takes the saved results the save kept, until another tool changes the file. A workbook
+created rather than
 opened has no package to edit and fails with `xlsx.write.invalid_package_plan`. Node.js `save`,
 `toBytes`, `saveEdits`, and `editsToBytes` read the workbook when their worker runs, not when they
 are called, so do not edit the workbook until the returned Promise settles: an edit made meanwhile
@@ -528,7 +541,15 @@ declaration: xlsxwriter and similar producers
 set it and may store placeholder results, so read such saved results only after calculating.
 `data_validations`/`dataValidations` page through a sheet's data validation rules with `offset` and
 `limit`; each rule carries its ranges, OOXML type, operator, and error-style tokens, its formulas as
-stored, and its flags and messages. `hyperlinks` and `comments` page the same way through a sheet's
+stored, and its flags and messages. `apply_changes_v2`/`applyChangesV2` take a rule in that shape:
+`set_data_validation`/`setDataValidation` applies it to its ranges, taking those cells out of every
+other rule, `clear_data_validations`/`clearDataValidations` takes ranges out of every rule, as
+Excel's Clear All does, `remove_data_validation`/`removeDataValidation` removes the rule at an
+index, and `set_data_validations`/`setDataValidations` replaces a sheet's rules, which the receipt
+inverse uses. They keep the semantic revision. A new rule must have the formulas its type needs,
+formulas that parse, and titles, messages, and list literals within Excel's lengths, and an edit
+reaching a rule the reader could not model fails with
+`validation.data_validation_overlaps_unmodeled_rule`. `hyperlinks` and `comments` page the same way through a sheet's
 hyperlinks and cell comments. `from_csv`/`fromCsv` open RFC 4180 UTF-8 CSV as a one-sheet
 workbook and `to_csv`/`toCsv` export one sheet, formulas as their values in the current calculated
 revision; a sheet without formulas needs no calculation. Reading never

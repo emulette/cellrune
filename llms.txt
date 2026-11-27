@@ -214,7 +214,13 @@ defaulting to true, and optional `properties` with `font_id` 0,
 (`sheet`, `address`), which are `WorkbookChange::set_frozen_pane`,
 `set_phonetics`, and `clear_phonetics` and keep the semantic revision; a
 batch replaces annotated text by clearing its phonetics before setting the
-value. Each summary sheet carries `frozen_pane` (`rows`, `columns`) only when
+value. The v2 batch also carries the data validation edits
+`set_data_validation` (`sheet`, `rule` in the shape `data_validations`
+returns), `clear_data_validations` (`sheet`, `ranges`),
+`remove_data_validation` (`sheet`, `index`), and `set_data_validations`
+(`sheet`, `rules`), which keep the semantic revision; an unknown token fails
+with `interop.change.invalid`, and a receipt's inverse sets the rules back
+with `set_data_validations`. Each summary sheet carries `frozen_pane` (`rows`, `columns`) only when
 it has one. Python `phonetics(sheet, offset=, limit=)` and Node.js
 `phonetics(sheet, { offset, limit })` (`WorkbookSession::phonetics`, MCP
 `workbook_phonetics`) page through the cells carrying phonetic runs in
@@ -471,7 +477,7 @@ than guessing a name from a different XLSX crate (`calamine`,
   so a hidden row inside an autoFilter with a filter condition may be a
   filtered row. A document-backed write keeps hidden rows, and the written
   output is verified to read back the same hidden rows.
-- `DataValidation` (read-only): `.ranges() -> &[CellRange]` (`sqref`
+- `DataValidation`: `.ranges() -> &[CellRange]` (`sqref`
   order), `.validation_type() -> DataValidationType`
   (`AnyValue | Whole | Decimal | List | Date | Time | TextLength | Custom`),
   `.operator() -> DataValidationOperator` (`Between` when omitted),
@@ -480,10 +486,43 @@ than guessing a name from a different XLSX crate (`calamine`,
   `showDropDown`), `.show_input_message()`, `.show_error_message()`,
   `.error_style() -> DataValidationErrorStyle` (`Stop | Warning |
   Information`), `.error_title()`, `.error_message()`, `.prompt_title()`,
-  and `.prompt_message()`. The three enums are `#[non_exhaustive]` and
-  `.as_str()` returns the OOXML token. A rule with a malformed `sqref`, a
-  repeated formula, or an unknown token is left unmodeled; its XML is
-  preserved. A sheet rename rewrites rule formulas as the saved part does,
+  and `.prompt_message()`. The three enums are `#[non_exhaustive]`;
+  `.as_str()` returns the OOXML token and `::from_token(&str)` parses it.
+  `DataValidation::new(Vec<CellRange>, DataValidationType)` builds a rule
+  with the OOXML defaults the reader returns for an omitted attribute
+  (`Between`, `Stop`, blank cells rejected, dropdown shown, no messages, no
+  formulas), and `.with_operator(..)`, `.with_formula1(..)`,
+  `.with_formula2(..)`, `.with_allow_blank(bool)`,
+  `.with_in_cell_dropdown(bool)`, `.with_input_message(show, Option<&str>
+  title, Option<&str> message)`, and `.with_error_alert(show, style, title,
+  message)` set the rest. Data validation edits, which keep the semantic
+  revision and carry an inverse, are `WorkbookChange::set_data_validation(
+  sheet, rule)` (the rule's cells leave every other rule, a rule left
+  without cells goes, and the rule becomes the last), `clear_data_validations(
+  sheet, Vec<CellRange>)` (Excel's Clear All, also across a rule split into
+  several elements), `remove_data_validation(sheet, index)` (an index of
+  `data_validations()`, counted after the batch's earlier changes), and
+  `set_data_validations(sheet, Vec<DataValidation>)` (replaces the list as
+  given; the edit inverse uses it). A new rule fails with
+  `DataValidationRangesInvalid` (no range or over 32,767),
+  `DataValidationFormulaMissing` (a list or custom rule without `formula1`, a
+  comparison without its bounds), `DataValidationFormulaInvalid` (a formula
+  that does not parse), `DataValidationTextTooLong` (`promptTitle` and
+  `errorTitle` over 32, `prompt` over 255, `error` over 224 UTF-16 code
+  units, or a quoted list literal over 255), or `DataValidationTextInvalid`
+  (a character XML 1.0 cannot carry); `set_data_validations` checks a rule
+  the sheet or its file already held only for the last. A rule with a
+  malformed `sqref`, a repeated formula, or an unknown token is left
+  unmodeled; its XML is preserved, and a set or clear whose ranges reach its
+  cells, or any cell when its ranges could not be read, fails with
+  `DataValidationOverlapsUnmodeledRule`. A save writes rules whose formulas
+  name another sheet or workbook in the `x14:dataValidations` extension and
+  the others in `<dataValidations>`; over a source part, an element holding
+  an unchanged rule keeps its bytes, one whose rule lost or gained ranges
+  keeps its markup, such as `imeMode`, with the new `sqref`, and a minimal
+  write changes only that worksheet part. Rules a save keeps stay in place
+  and new rules follow them, so a reopened sheet may list the rules in
+  another order than the session. A sheet rename rewrites rule formulas as the saved part does,
   without charging the session's formula-rewrite budget; a rule formula that
   does not parse keeps its text, and saving such a rename still fails as it
   did. Rules are not part of the semantic fingerprint.
@@ -740,6 +779,14 @@ than guessing a name from a different XLSX crate (`calamine`,
   `forceFullCalc`; other saved results, `calcPr`, `calcChain.xml` while every
   formula keeps its cell and array kind, and untouched parts keep their
   bytes. The output is verified before success.
+  `WriteOptions::with_saved_result_mark(true)` also appends to the
+  `extLst` of `workbook.xml` an `ext` holding a SHA-256 of the package with
+  the mark taken out, when the source's saved results were current (no
+  `fullCalcOnLoad`, or a mark it still matches); a targeted calculation of
+  the file opened again with `UncalculablePrecedents::SavedResult` then
+  trusts the saved results the write kept, until another tool changes any
+  part. Other writes ignore the option, and without it the output is as
+  before.
 - `EditWriteReport`: `.affected_formulas()` (cell order),
   `.requests_host_recalculation()`, `.changed_parts()`, `.removed_parts()`
   (for example a `calcChain.xml` the edits invalidated), `.output_hash()`,
@@ -1064,7 +1111,8 @@ than guessing a name from a different XLSX crate (`calamine`,
 - `receipt.inverse() -> Option<&EditInverse>` is present for a batch with a
   grid edit (insert, delete, or move rows, columns, or a range, copy a range),
   a sheet deletion, move, or copy, a defined-name rename, or a table creation,
-  range change, conversion, or sheet auto-filter change. `EditInverse::changes()`
+  range change, conversion, sheet auto-filter change, or data validation edit.
+  `EditInverse::changes()`
   are the `WorkbookChange`s that undo the batch when applied as one batch to
   the workbook it produced; `EditInverse::unrestored()` lists
   `UnrestoredContent` (`.kind()`, `.sheet_id()`, `.table_id()`) whose
@@ -1675,6 +1723,17 @@ than guessing a name from a different XLSX crate (`calamine`,
   captures an owned `PreparedTargetCalculation`; `.run()` returns `CompletedTargetCalculation`.
   `session.finish_target_calculation(completed)` validates cancellation and source state without
   installing anything. `session.calculate_targets(...)` is the synchronous convenience method.
+  `prepare_target_calculation_with`/`calculate_targets_with` take an `UncalculablePrecedents`
+  before the token (`#[non_exhaustive]`, default `Unavailable`). With `SavedResult`, a precedent
+  formula the request cannot calculate gives the requested cells reading it its saved result when
+  that is a present result of a single-cell, non-volatile formula on a sheet of the file the
+  session was opened from (or a copy of one; not an added or imported sheet), the file is not in
+  manual calculation mode and does not declare `fullCalcOnLoad="1"` (unless a marked minimal write
+  set it), and no edit of the session reaches the formula, by the minimal write's analysis.
+  Preparing such a request runs that analysis, and verifies a mark, each time. Calculable precedents are calculated as before, a
+  requested cell CellRune cannot calculate still reports its issue, a complete calculation is not
+  reused, and `TargetCalculationResult::saved_precedents(cell) -> &[CalculationCellId]` names the
+  precedents a value went through. The free `calculate_targets` takes no saved results.
   A complete calculation is reused only for the same source identity/revision and calculation
   options (including formula limits). Partial results are not retained as a new cache.
 - Known legacy-array and dynamic-spill followers evaluate their complete anchor, retaining the
@@ -1693,6 +1752,12 @@ than guessing a name from a different XLSX crate (`calamine`,
   semanticRevision; Python uses snake case and an int. Both run native evaluation off-lock;
   Python releases the GIL and Node uses a worker. Cancellation, supersession and close use the
   existing active-calculation lifecycle.
+- Python `uncalculable_precedents="saved_result"`, Node.js `uncalculablePrecedents:
+  "saved_result"`, and MCP `uncalculable_precedents` select saved results; a response cell then
+  carries `saved_precedents`/`savedPrecedents` (cell references), left out when empty. Python
+  `edits_to_bytes(saved_result_mark=True)`/`save_edits(..., saved_result_mark=True)`, Node.js
+  `editsToBytes({ savedResultMark: true })`/`saveEdits(path, { savedResultMark: true })`, and MCP
+  `workbook_save_edits_as` `saved_result_mark` mark a minimal save.
 - MCP `workbook_calculate_targets` takes `session_id`, `targets`, optional `options` and `limits`,
   with snake-case interop fields. The server caps limits at the defaults above and rejects a
   response that cannot fit `--max-response-bytes` in full. There is no partial-result paging
