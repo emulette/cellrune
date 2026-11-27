@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "cellrune"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cap-std",
  "libm",
@@ -158,14 +158,14 @@ dependencies = [
 
 [[package]]
 name = "cellrune-binding-support"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cellrune-interop",
 ]
 
 [[package]]
 name = "cellrune-integration-tests"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cellrune",
  "cellrune-interop",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "cellrune-interop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cap-std",
  "cellrune",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "cellrune-mcp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cap-std",
  "cellrune-interop",
@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "cellrune-node"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cellrune-binding-support",
  "cellrune-interop",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "cellrune-python"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cellrune-binding-support",
  "cellrune-interop",
