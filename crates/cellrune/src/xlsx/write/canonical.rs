@@ -582,7 +582,9 @@ pub(super) fn generated_worksheet_xml(
         }
         xml.push_str("</mergeCells>");
     }
+    super::data_validation_xml::push_data_validations(&mut xml, sheet)?;
     super::table::push_table_parts(&mut xml, sheet);
+    super::data_validation_xml::push_extension_validations(&mut xml, sheet)?;
     xml.push_str("</worksheet>");
     Ok(xml)
 }

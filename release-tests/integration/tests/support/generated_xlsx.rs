@@ -1054,6 +1054,68 @@ pub fn generated_data_validation_workbook() -> Vec<u8> {
     )
 }
 
+/// A script sheet `Script` whose role columns take their names from the list sheet `Lists`
+/// through the defined name `Roles`, as a game script's role dropdown does. `Script` holds:
+/// - a list rule on `Roles` over B2:B10 carrying `imeMode`, which the model does not read;
+/// - one `"Yes,No"` list rule split, as a copy and paste leaves it, over D2:D4 and D6:D8;
+/// - a rule of the unknown type `bogus` over F1:F3, which the reader leaves unmodeled;
+/// - an Excel 2010 extension rule listing `Lists!$A$1:$A$3` over E2:E5;
+/// - C1 = A1*2 with the saved result 4.
+pub fn generated_data_validation_edit_fixture() -> Vec<u8> {
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Script" sheetId="1" r:id="rId1"/>
+    <sheet name="Lists" sheetId="2" state="hidden" r:id="rId2"/>
+  </sheets>
+  <definedNames>
+    <definedName name="Roles">Lists!$A$1:$A$3</definedName>
+  </definedNames>
+  <calcPr calcId="191029"/>
+</workbook>"#;
+    let script = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>2</v></c><c r="C1"><f>A1*2</f><v>4</v></c></row>
+    <row r="2"><c r="B2" t="inlineStr"><is><t>Hero</t></is></c></row>
+  </sheetData>
+  <dataValidations count="4">
+    <dataValidation type="list" allowBlank="1" showErrorMessage="1" imeMode="hiragana" sqref="B2:B10"><formula1>Roles</formula1></dataValidation>
+    <dataValidation type="list" sqref="D2:D4"><formula1>"Yes,No"</formula1></dataValidation>
+    <dataValidation type="list" sqref="D6:D8"><formula1>"Yes,No"</formula1></dataValidation>
+    <dataValidation type="bogus" sqref="F1:F3"/>
+  </dataValidations>
+  <extLst>
+    <ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}">
+      <x14:dataValidations count="1">
+        <x14:dataValidation type="list" allowBlank="1"><x14:formula1><xm:f>Lists!$A$1:$A$3</xm:f></x14:formula1><xm:sqref>E2:E5</xm:sqref></x14:dataValidation>
+      </x14:dataValidations>
+    </ext>
+  </extLst>
+</worksheet>"#;
+    let lists = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Hero</t></is></c></row>
+    <row r="2"><c r="A2" t="inlineStr"><is><t>Rival</t></is></c></row>
+    <row r="3"><c r="A3" t="inlineStr"><is><t>Narrator</t></is></c></row>
+  </sheetData>
+</worksheet>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
+            ("xl/styles.xml", STYLES),
+            ("xl/worksheets/sheet1.xml", script),
+            ("xl/worksheets/sheet2.xml", lists),
+        ],
+        None,
+    )
+}
+
 /// One sheet `Styled` whose styles exercise every part of the format model: style 1 is bold red
 /// Arial 12 on solid yellow with thin black side borders, centered and wrapped; style 2 has a
 /// gradient fill and a custom number format; style 3 aligns top with indent 2 and 45-degree text.

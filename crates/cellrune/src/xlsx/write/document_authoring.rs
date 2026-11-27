@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::auto_filter_patch::rewrite_sheet_auto_filter;
 use super::canonical::{ExpectedDraftOutput, generated_worksheet_xml, verify_draft_output};
+use super::data_validation_xml::patch_data_validations;
 use super::grid_parts::{CopyReplay, replay_copy_parts, replay_copy_worksheet, replay_grid_edits};
 use super::layout_patch::{LayoutChanges, patch_sheet_layout};
 use super::materialization::{MaterializationAction, MaterializationPlan};
@@ -102,6 +103,7 @@ pub(crate) fn write_document_draft(
         && draft.presentation_sheet_mutations().is_empty()
         && draft.changed_table_ids().is_empty()
         && auto_filter_sheets.is_empty()
+        && changed_validation_sheets(draft, document).is_empty()
         && format_edits(draft).is_empty()
         && layout_sheets(draft, document.presentation()).is_empty()
     {
@@ -899,6 +901,36 @@ pub(super) fn write_document_package(
         &deletion.removed_parts,
         limits,
     )?;
+    // Data validation formulas name sheets and defined names, so the rules are matched once the
+    // renames above have rewritten the part.
+    for sheet_id in changed_validation_sheets(draft, document) {
+        let sheet = draft
+            .workbook()
+            .sheet_by_id(sheet_id)
+            .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+        if let Some(part) = copy_parts.get(&sheet_id) {
+            let bytes = additions
+                .get(part)
+                .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+            if let Some(patched) = patch_data_validations(bytes, part, sheet, limits)? {
+                additions.insert(part.clone(), patched);
+            }
+        } else {
+            let part = document
+                .worksheet_part_path(sheet_id)
+                .cloned()
+                .ok_or_else(|| invalid_plan(DETAIL_MISSING_SHEET_PART))?;
+            let patched = match replacements.get(&part) {
+                Some(bytes) => patch_data_validations(bytes, &part, sheet, limits)?,
+                None => {
+                    patch_data_validations(&source_reader.read_part(&part)?, &part, sheet, limits)?
+                }
+            };
+            if let Some(patched) = patched {
+                replacements.insert(part, patched);
+            }
+        }
+    }
     // A table converted to a range leaves its sheet's `<tableParts>` and relationships.
     for (worksheet, (relationship_part, ids)) in &table_removal.worksheets {
         let bytes = match replacements.get(worksheet) {
@@ -1351,6 +1383,24 @@ fn moved_source_presentation<'a>(
         }
     }
     std::borrow::Cow::Owned(presentation)
+}
+
+/// Returns the sheets written over a source part whose data validation rules differ from those
+/// of the source sheet the part comes from.
+fn changed_validation_sheets(draft: &WorkbookDraft, document: &XlsxDocument) -> BTreeSet<SheetId> {
+    draft
+        .workbook()
+        .sheets()
+        .iter()
+        .filter(|sheet| !draft.added_sheets().contains(&sheet.id()))
+        .filter(|sheet| {
+            document
+                .workbook()
+                .sheet_by_id(source_sheet_id(draft, sheet.id()))
+                .is_some_and(|source| source.data_validations() != sheet.data_validations())
+        })
+        .map(Sheet::id)
+        .collect()
 }
 
 /// Existing sheets, copies included, whose sheet-level autoFilter differs from the one their part

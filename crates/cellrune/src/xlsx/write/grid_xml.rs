@@ -110,6 +110,17 @@ impl XmlDocument {
         Ok(Self { nodes })
     }
 
+    /// Returns the root element, without the events around it.
+    pub(super) fn into_root(self) -> XmlElement {
+        self.nodes
+            .into_iter()
+            .find_map(|node| match node {
+                XmlNode::Element(element) => Some(element),
+                XmlNode::Other(_) => None,
+            })
+            .expect("a parsed document has a root element")
+    }
+
     pub(super) fn root_mut(&mut self) -> &mut XmlElement {
         self.nodes
             .iter_mut()

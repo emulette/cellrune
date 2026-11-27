@@ -6,6 +6,7 @@ mod generated_workbook {
     mod compatibility_relaxation;
     mod contract;
     mod data_validation_read;
+    mod data_validation_write;
     mod defined_name_rename_write;
     mod defined_name_write;
     mod draft_edits_write;

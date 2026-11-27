@@ -1,6 +1,7 @@
 mod authoring;
 mod auto_filter_patch;
 mod canonical;
+mod data_validation_xml;
 mod document_authoring;
 mod document_edits;
 mod edit_report;
