@@ -17,8 +17,8 @@ inventories, and measurements belong in the linked documentation rather than in 
   `remove_data_validation`, and `set_data_validations` edit a sheet's rules with the
   one-rule-per-cell semantics of Excel's Data Validation dialog. The edits keep the semantic
   revision and carry an edit inverse. A new rule must have the formulas its type needs, formulas
-  that parse, and titles, messages, and list literals within Excel's lengths; an edit reaching a rule
-  the reader could not model is refused. Saves write rules naming another sheet or workbook in the
+  that parse, and titles, messages, and list literals within Excel's lengths; a set or clear
+  reaching a rule the reader could not model is refused. Saves write rules naming another sheet or workbook in the
   Excel 2010 extension, keep the markup of rules they keep, and a minimal write changes only the
   edited worksheet part. Edit schema v2 carries the same edits on the interop, Python, Node.js, and
   MCP surfaces, taking a rule in the shape `data_validations` returns. The validation error codes
@@ -44,7 +44,7 @@ inventories, and measurements belong in the linked documentation rather than in 
 ### Changed
 
 - A formula edit recompiled in place updates the impact index for the edited formulas instead of
-  building it again, so the edit takes about a third less time on a workbook of 120,000 formulas.
+  building it again, which shortens a formula edit in a large workbook.
 
 ## [0.2.0] - 2026-10-27
 

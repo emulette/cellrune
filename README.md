@@ -275,13 +275,14 @@ Known array followers calculate their entire anchor. For an undeclared spill who
 never been calculated, include its anchor in the request; an unknown follower alone cannot locate
 an arbitrary formula elsewhere in the workbook. By default saved formula results are never used as
 current calculation values. A session request may opt in with
-`UncalculablePrecedents::SavedResult` (`uncalculable_precedents="saved_result"` in Python,
-`uncalculablePrecedents: "saved_result"` in Node.js and MCP): a precedent formula CellRune cannot
+`UncalculablePrecedents::SavedResult` (`uncalculable_precedents="saved_result"` in Python and
+MCP, `uncalculablePrecedents: "saved_result"` in Node.js): a precedent formula CellRune cannot
 calculate, such as one calling an unsupported function, then gives the requested cells its saved
 result while that result is current, that is, while the file is not in manual calculation mode,
-does not ask its host to recalculate on open, and no edit of the session reaches the precedent; a
-volatile formula, or one on a sheet added or imported in the session, gives none. Calculable precedents are calculated
-either way, and each requested cell names the precedents its value took a saved result from in
+does not ask its host to recalculate on open, and no edit of the session reaches the precedent. A
+formula that reads a volatile function, directly or through other formulas, and one on a sheet
+the session added, copied, or imported gives none. Calculable precedents are calculated either
+way, and each requested cell names the precedents its value took a saved result from in
 `saved_precedents`. See [llms.txt](https://github.com/emulette/cellrune/blob/main/llms.txt) for
 the complete Rust types and transport contract.
 
@@ -519,11 +520,10 @@ try {
 ```
 
 `edits_to_bytes`/`editsToBytes` return the same package in memory. With `saved_result_mark`
-(`savedResultMark` in Node.js and MCP), the save also marks `workbook.xml` with a digest of the
-package when the source's saved results were current, so that a targeted calculation of the file
-opened again takes the saved results the save kept, until another tool changes the file. A workbook
-created rather than
-opened has no package to edit and fails with `xlsx.write.invalid_package_plan`. Node.js `save`,
+(`savedResultMark` in Node.js), the save also marks `workbook.xml` with a digest of the package
+when the source's saved results were current and the session copied no sheet, so that a targeted
+calculation of the file opened again takes the saved results the save kept, until another tool
+changes the file. A workbook created rather than opened has no package to edit and fails with `xlsx.write.invalid_package_plan`. Node.js `save`,
 `toBytes`, `saveEdits`, and `editsToBytes` read the workbook when their worker runs, not when they
 are called, so do not edit the workbook until the returned Promise settles: an edit made meanwhile
 may or may not be saved, or may fail with `interop.session.unavailable`.
@@ -547,10 +547,10 @@ other rule, `clear_data_validations`/`clearDataValidations` takes ranges out of 
 Excel's Clear All does, `remove_data_validation`/`removeDataValidation` removes the rule at an
 index, and `set_data_validations`/`setDataValidations` replaces a sheet's rules, which the receipt
 inverse uses. They keep the semantic revision. A new rule must have the formulas its type needs,
-formulas that parse, and titles, messages, and list literals within Excel's lengths, and an edit
-reaching a rule the reader could not model fails with
-`validation.data_validation_overlaps_unmodeled_rule`. `hyperlinks` and `comments` page the same way through a sheet's
-hyperlinks and cell comments. `from_csv`/`fromCsv` open RFC 4180 UTF-8 CSV as a one-sheet
+formulas that parse, and titles, messages, and list literals within Excel's lengths, and a set or
+clear reaching a rule the reader could not model fails with
+`validation.data_validation_overlaps_unmodeled_rule`. `hyperlinks` and `comments` page the same
+way through a sheet's hyperlinks and cell comments. `from_csv`/`fromCsv` open RFC 4180 UTF-8 CSV as a one-sheet
 workbook and `to_csv`/`toCsv` export one sheet, formulas as their values in the current calculated
 revision; a sheet without formulas needs no calculation. Reading never
 creates a formula: unquoted decimal numbers, `TRUE`/`FALSE` in any case, and Excel error spellings
