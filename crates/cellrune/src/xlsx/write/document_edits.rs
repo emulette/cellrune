@@ -52,7 +52,11 @@ pub(crate) fn write_document_edits(
             materialization: &materialization,
             host_recalculation,
             keep_calculation_chain: formula_layout(source) == formula_layout(draft.workbook()),
-            saved_result_mark: options.saved_result_mark() && saved_results_current(document),
+            // A copy keeps its source's saved results, which edits made before the copy can leave
+            // out of date without the analysis above reaching them.
+            saved_result_mark: options.saved_result_mark()
+                && draft.copied_sheets().is_empty()
+                && saved_results_current(document),
         },
         limits,
     )?;

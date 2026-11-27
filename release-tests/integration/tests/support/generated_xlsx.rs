@@ -1119,8 +1119,9 @@ pub fn generated_data_validation_edit_fixture() -> Vec<u8> {
 /// One sheet `Inputs` whose B1 calls WEBSERVICE, which CellRune does not calculate, on A1 with the
 /// saved result 42, as the spreadsheet app that saved the file calculated it. C1 = B1*2 reads it,
 /// D1 = A1+1 does not, and E1 = C1+B1 reads it twice. F1 = NOW() saved 45000.5, which CellRune
-/// does not calculate without a supplied time, and G1 = F1+1 reads it. H1 = A1+A1+A1 saved 15, and
-/// I1 = H1*2 reads it. `full_calculation_on_load` makes the file ask its host to recalculate on
+/// does not calculate without a supplied time, G1 = F1+1 reads it, and J1 = G1*2 reads G1.
+/// K1 = WEBSERVICE(F1) saved 7, and L1 = K1+1 reads it. H1 = B1+C1+E1 saved 252, and I1 = H1*2
+/// reads it. `full_calculation_on_load` makes the file ask its host to recalculate on
 /// open, as writers saving placeholder results do.
 pub fn generated_saved_precedent_fixture(full_calculation_on_load: bool) -> Vec<u8> {
     let workbook = format!(
@@ -1149,6 +1150,9 @@ pub fn generated_saved_precedent_fixture(full_calculation_on_load: bool) -> Vec<
       <c r="G1"><f>F1+1</f><v>45001.5</v></c>
       <c r="H1"><f>B1+C1+E1</f><v>252</v></c>
       <c r="I1"><f>H1*2</f><v>504</v></c>
+      <c r="J1"><f>G1*2</f><v>90003</v></c>
+      <c r="K1"><f>WEBSERVICE(F1)</f><v>7</v></c>
+      <c r="L1"><f>K1+1</f><v>8</v></c>
     </row>
   </sheetData>
 </worksheet>"#;

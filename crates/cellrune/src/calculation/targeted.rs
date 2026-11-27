@@ -61,8 +61,9 @@ pub enum UncalculablePrecedents {
 pub(crate) struct SavedResultTrust {
     /// The formulas the session's edits can have made out of date since the file was saved.
     edited: BTreeSet<CalculationCellId>,
-    /// The sheets whose saved results come from the file: its own sheets and copies of them, not
-    /// sheets added or imported from another workbook.
+    /// The sheets whose saved results come from the file and which the session did not create: a
+    /// copy takes its source's saved results, which edits made before the copy can leave out of
+    /// date, and an added or imported sheet's come from elsewhere.
     sheets: BTreeSet<SheetId>,
 }
 
@@ -84,10 +85,7 @@ impl SavedResultTrust {
             .sheets()
             .iter()
             .map(|sheet| sheet.id())
-            .filter(|id| {
-                let origin = draft.copied_sheets().get(id).copied().unwrap_or(*id);
-                source.sheet_by_id(origin).is_some()
-            })
+            .filter(|id| source.sheet_by_id(*id).is_some())
             .collect();
         Some(Self {
             edited: crate::xlsx::formulas_edits_reach(draft, source),

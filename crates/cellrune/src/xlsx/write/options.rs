@@ -467,7 +467,8 @@ impl WriteOptions {
     /// the file again cannot tell its other saved results are current. The mark, an extension of
     /// `workbook.xml` holding a SHA-256 of the package, lets
     /// [`crate::UncalculablePrecedents::SavedResult`] take them while the package still matches it.
-    /// It is written only when the source's saved results were current, and other writes ignore it.
+    /// It is written only when the source's saved results were current and the draft copied no
+    /// sheet, and other writes ignore it.
     pub const fn with_saved_result_mark(mut self, saved_result_mark: bool) -> Self {
         self.saved_result_mark = saved_result_mark;
         self

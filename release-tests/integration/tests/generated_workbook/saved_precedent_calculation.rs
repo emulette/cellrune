@@ -83,18 +83,30 @@ fn an_uncalculable_precedent_gives_its_saved_result_only_when_asked() {
 }
 
 #[test]
-fn a_volatile_precedent_gives_no_saved_result() {
+fn a_formula_reading_a_volatile_one_gives_no_saved_result() {
     let session = session(false);
-    let result = session
-        .calculate_targets_with(
-            &[CalculationTarget::cell(cell("G1"))],
-            CalculationOptions::default(),
-            TargetCalculationLimits::default(),
-            UncalculablePrecedents::SavedResult,
-            CancellationToken::new(),
-        )
-        .expect("targeted calculation");
-    assert!(unavailable(&result, "G1"), "NOW() saved at another time");
+    let request = |address: &str, options: CalculationOptions| {
+        session
+            .calculate_targets_with(
+                &[CalculationTarget::cell(cell(address))],
+                options,
+                TargetCalculationLimits::default(),
+                UncalculablePrecedents::SavedResult,
+                CancellationToken::new(),
+            )
+            .expect("targeted calculation")
+    };
+    // G1 reads NOW(), whose saved result belongs to the time the file was saved.
+    assert!(unavailable(
+        &request("J1", CalculationOptions::default()),
+        "J1"
+    ));
+    let now =
+        CalculationOptions::default().with_now_serial(FiniteNumber::new(46000.25).expect("finite"));
+    assert!(
+        unavailable(&request("L1", now), "L1"),
+        "K1 reads NOW() even when the request supplies the time"
+    );
 }
 
 #[test]
@@ -116,6 +128,44 @@ fn a_precedent_over_the_dependency_budget_gives_its_saved_result() {
         .expect("targeted calculation");
     assert_eq!(result.cell(cell("I1")), Some(&number(504.0)));
     assert!(result.saved_precedents(cell("I1")).contains(&cell("H1")));
+}
+
+#[test]
+fn a_copied_sheet_gives_no_saved_result() {
+    let mut session = session(false);
+    let sheet = SheetId::new(1).expect("sheet ID");
+    let revision = session.workbook().semantic_revision();
+    session
+        .apply_changes(
+            revision,
+            EditBatch::new([
+                WorkbookChange::set_cell_value(
+                    sheet,
+                    CellAddress::from_a1("A1").expect("address"),
+                    CellValue::Number(FiniteNumber::new(7.0).expect("finite")),
+                ),
+                WorkbookChange::copy_sheet(sheet, 2),
+            ]),
+        )
+        .expect("edit and copy");
+    let copy = session.workbook().sheets()[2].id();
+    let target = CalculationCellId::new(copy, CellAddress::from_a1("C1").expect("address"));
+    let result = session
+        .calculate_targets_with(
+            &[CalculationTarget::cell(target)],
+            CalculationOptions::default(),
+            TargetCalculationLimits::default(),
+            UncalculablePrecedents::SavedResult,
+            CancellationToken::new(),
+        )
+        .expect("targeted calculation");
+    assert!(
+        matches!(
+            result.cell(target),
+            Some(CalculationCellResult::Unavailable(_))
+        ),
+        "the copy's B1 was saved with A1 = 5"
+    );
 }
 
 #[test]
@@ -317,6 +367,29 @@ mod reopened {
             &calculate(&session(&changed), UncalculablePrecedents::SavedResult),
             "C1"
         ));
+    }
+
+    #[test]
+    fn a_minimal_write_with_a_copied_sheet_is_never_marked() {
+        let source = generated_saved_precedent_fixture(false);
+        let document = open_xlsx_document_bytes(&source, OpenOptions::default()).expect("open");
+        let mut draft = WorkbookDraft::from_document(&document);
+        draft
+            .apply_changes(EditBatch::new([
+                WorkbookChange::set_cell_formula(
+                    SheetId::new(2).expect("Other"),
+                    CellAddress::from_a1("A1").expect("address"),
+                    FormulaText::from_xlsx("Inputs!D1*3").expect("formula"),
+                ),
+                WorkbookChange::copy_sheet(SheetId::new(1).expect("Inputs"), 2),
+            ]))
+            .expect("edit and copy");
+        let output = write_xlsx_draft_edits_bytes(
+            &draft,
+            WriteOptions::default().with_saved_result_mark(true),
+        )
+        .expect("minimal write");
+        assert!(!part_text(output.bytes(), "xl/workbook.xml").contains(MARK_URI));
     }
 
     #[test]

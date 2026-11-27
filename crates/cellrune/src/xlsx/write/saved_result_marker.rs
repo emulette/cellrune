@@ -90,7 +90,12 @@ pub(crate) fn marked(
     let written = String::from_utf8(document.write(workbook_part, limits)?)
         .map_err(|_| no_workbook_end(workbook_part))?;
     let digest = package_digest(&split_mark(written.as_bytes()).0, workbook_part, parts);
-    Ok(written.replacen(PLACEHOLDER, &digest, 1).into_bytes())
+    let (start, end) =
+        mark_span(written.as_bytes()).ok_or_else(|| no_workbook_end(workbook_part))?;
+    let mut marked = written[..start].to_owned();
+    marked.push_str(&written[start..end].replacen(PLACEHOLDER, &digest, 1));
+    marked.push_str(&written[end..]);
+    Ok(marked.into_bytes())
 }
 
 /// Parses one element whose names `prefix` qualifies in the main namespace.

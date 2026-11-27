@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::reference::cell_at;
 use super::{DependencyTarget, Engine, public_to_internal};
+use crate::calculation::functions::descriptor::Volatility;
 use crate::calculation::graph::{DependencyGraph, DependencyNode};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::CellId;
@@ -150,6 +151,37 @@ impl<'workbook> Engine<'workbook> {
     }
 }
 
+/// Whether the formula at `cell`, or one it reads directly or through other formulas, calls a
+/// volatile function, whose saved result belongs to the time the file was saved.
+fn reads_volatile(engine: &Engine<'_>, cell: CellId) -> bool {
+    let mut visited = BTreeSet::from([cell]);
+    let mut pending = vec![cell];
+    while let Some(current) = pending.pop() {
+        if let Some(expr) = engine.parsed_expr(current) {
+            let inputs = crate::calculation::pipeline::formula_volatility(engine, current.0, expr);
+            if [Volatility::Today, Volatility::Now, Volatility::Random]
+                .into_iter()
+                .any(|volatility| inputs.contains(volatility))
+            {
+                return true;
+            }
+        }
+        for node in engine
+            .dependencies
+            .dependencies(current)
+            .into_iter()
+            .flatten()
+        {
+            if let DependencyNode::Cell(dependency) = node
+                && visited.insert(*dependency)
+            {
+                pending.push(*dependency);
+            }
+        }
+    }
+    false
+}
+
 impl Planner<'_> {
     /// Gives an evaluated formula that the calculation cannot calculate its saved result, for the
     /// formulas reading it, when the request takes saved results and trusts this one.
@@ -158,11 +190,8 @@ impl Planner<'_> {
             return;
         };
         let result = crate::calculation::pipeline::target_result(engine.workbook, engine, cell);
-        // A volatile formula missing its input has no saved result current at another time.
-        let CalculationCellResult::Unavailable(issue) = &result else {
-            return;
-        };
-        if issue.code() == crate::CalculationIssueCode::VolatileInputMissing {
+        if !matches!(result, CalculationCellResult::Unavailable(_)) || reads_volatile(engine, cell)
+        {
             return;
         }
         let Some(public) = crate::calculation::eval::internal_to_public(engine.workbook, cell)
