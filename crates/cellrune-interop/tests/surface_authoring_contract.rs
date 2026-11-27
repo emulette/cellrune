@@ -297,6 +297,7 @@ fn targeted_limit_failures_report_counted_cells_and_work() {
         }],
         options: CalculationOptionsDto::default(),
         limits,
+        uncalculable_precedents: Default::default(),
     };
     let error = session
         .calculate_targets(&request(

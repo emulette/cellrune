@@ -27,6 +27,7 @@ pub use service::{CompletedTargetRequest, PreparedTargetRequest};
 pub use targeted::{
     CalculationTargetDto, TargetCalculationCellDto, TargetCalculationLimitsDto,
     TargetCalculationRequestDto, TargetCalculationResultDto, TargetCalculationScopeDto,
+    UncalculablePrecedentsDto,
 };
 
 pub use cellrune::{CancellationToken, ImportedSheet};

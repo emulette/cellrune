@@ -631,8 +631,13 @@ class Workbook {
     return normalizeWriteReport(await withErrors(task));
   }
 
-  async editsToBytes() {
-    const task = withSyncErrors(() => this.#session().editsToBytes());
+  async editsToBytes(options = {}) {
+    requireOptions(options);
+    requireOptionKeys(options, ["savedResultMark"]);
+    requireOptionalBoolean(options.savedResultMark, "savedResultMark");
+    const task = withSyncErrors(() =>
+      this.#session().editsToBytes(options.savedResultMark ?? false),
+    );
     return withErrors(task);
   }
 
@@ -640,8 +645,13 @@ class Workbook {
     requireString(path, "path");
     requireOptions(options);
     requireOptionalBoolean(options.replaceExisting, "replaceExisting");
+    requireOptionalBoolean(options.savedResultMark, "savedResultMark");
     const task = withSyncErrors(() =>
-      this.#session().saveEditsPath(path, options.replaceExisting ?? false),
+      this.#session().saveEditsPath(
+        path,
+        options.replaceExisting ?? false,
+        options.savedResultMark ?? false,
+      ),
     );
     return normalizeEditWriteReport(await withErrors(task));
   }

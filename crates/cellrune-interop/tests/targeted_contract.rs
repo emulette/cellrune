@@ -256,3 +256,108 @@ fn cancellation_after_run_clears_only_its_own_active_request() {
         .finish_target_calculation(current.run().expect("current run"))
         .expect("current finish");
 }
+
+/// One sheet whose B1 calls WEBSERVICE, which CellRune does not calculate, with the saved result
+/// 42, and whose C1 reads it.
+fn saved_precedent_fixture() -> Vec<u8> {
+    let parts = [
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/workbook.xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>5</v></c><c r="B1"><f>WEBSERVICE("https://example.com/"&amp;A1)</f><v>42</v></c><c r="C1"><f>B1*2</f><v>84</v></c></row></sheetData></worksheet>"#,
+        ),
+    ];
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut buffer);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, contents) in parts {
+            use std::io::Write;
+            writer.start_file(name, options).expect("fixture part");
+            writer
+                .write_all(contents.as_bytes())
+                .expect("fixture bytes");
+        }
+        writer.finish().expect("fixture archive");
+    }
+    buffer.into_inner()
+}
+
+#[test]
+fn saved_results_stand_for_uncalculable_precedents_only_when_asked() {
+    let mut session =
+        cellrune_interop::WorkbookSession::open_bytes(&saved_precedent_fixture()).expect("open");
+    let mut calculate = |choice: serde_json::Value| {
+        let mut request = serde_json::json!({"targets": [{"sheet": "Sheet1", "start": "C1"}]});
+        if !choice.is_null() {
+            request["uncalculable_precedents"] = choice;
+        }
+        let request: TargetCalculationRequestDto =
+            serde_json::from_value(request).expect("typed request");
+        serde_json::to_value(session.calculate_targets(&request).expect("targets"))
+            .expect("serialize")["cells"][0]
+            .clone()
+    };
+    let default = calculate(serde_json::Value::Null);
+    assert_eq!(default["result"]["kind"], "unavailable");
+    assert!(
+        default.get("saved_precedents").is_none(),
+        "a default response keeps its shape"
+    );
+    assert_eq!(calculate(serde_json::json!("unavailable")), default);
+    let saved = calculate(serde_json::json!("saved_result"));
+    assert_eq!(saved["result"]["value"]["value"], 84.0);
+    assert_eq!(saved["saved_precedents"][0]["address"], "B1");
+}
+
+#[test]
+fn a_marked_minimal_save_keeps_saved_results_for_the_reopened_file() {
+    let reopened_c1 = |mark: bool| {
+        let mut session = cellrune_interop::WorkbookSession::open_bytes(&saved_precedent_fixture())
+            .expect("open");
+        let revision = session.summary().semantic_revision;
+        session
+            .apply_changes_v2(
+                revision,
+                serde_json::from_value(serde_json::json!({"changes": [
+                    {"kind": "set_formula", "sheet": "Sheet1", "address": "Z1", "formula": "=1+1", "dynamic_range": null}
+                ]}))
+                .expect("batch"),
+            )
+            .expect("edit");
+        let (bytes, report) = session
+            .save_edits_bytes_with(cellrune_interop::EditWriteOptionsDto {
+                saved_result_mark: mark,
+                ..Default::default()
+            })
+            .expect("minimal save");
+        assert!(report.requests_host_recalculation);
+        let mut reopened = cellrune_interop::WorkbookSession::open_bytes(&bytes).expect("reopen");
+        let request: TargetCalculationRequestDto = serde_json::from_value(serde_json::json!({
+            "targets": [{"sheet": "Sheet1", "start": "C1"}],
+            "uncalculable_precedents": "saved_result"
+        }))
+        .expect("typed request");
+        serde_json::to_value(reopened.calculate_targets(&request).expect("targets"))
+            .expect("serialize")["cells"][0]["result"]
+            .clone()
+    };
+    assert_eq!(reopened_c1(true)["value"]["value"], 84.0);
+    assert_eq!(reopened_c1(false)["kind"], "unavailable");
+}

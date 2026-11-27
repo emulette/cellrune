@@ -546,9 +546,13 @@ impl NativeWorkbook {
     }
 
     #[napi(ts_return_type = "Promise<Buffer>", catch_unwind)]
-    pub fn edits_to_bytes(&self) -> AsyncTask<EditsBytesTask> {
+    pub fn edits_to_bytes(&self, saved_result_mark: bool) -> AsyncTask<EditsBytesTask> {
         AsyncTask::new(EditsBytesTask {
             session: Arc::clone(&self.session),
+            options: EditWriteOptionsDto {
+                replace_existing: false,
+                saved_result_mark,
+            },
         })
     }
 
@@ -557,11 +561,15 @@ impl NativeWorkbook {
         &self,
         path: String,
         replace_existing: bool,
+        saved_result_mark: bool,
     ) -> AsyncTask<SaveEditsPathTask> {
         AsyncTask::new(SaveEditsPathTask {
             session: Arc::clone(&self.session),
             path,
-            options: EditWriteOptionsDto { replace_existing },
+            options: EditWriteOptionsDto {
+                replace_existing,
+                saved_result_mark,
+            },
         })
     }
 }

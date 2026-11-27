@@ -283,6 +283,7 @@ impl Task for SavePathTask {
 
 pub struct EditsBytesTask {
     pub(crate) session: Arc<SharedWorkbookSession>,
+    pub(crate) options: EditWriteOptionsDto,
 }
 
 impl Task for EditsBytesTask {
@@ -294,7 +295,7 @@ impl Task for EditsBytesTask {
             self.session
                 .lock()
                 .map_err(napi_error)?
-                .save_edits_bytes()
+                .save_edits_bytes_with(self.options)
                 .map(|(bytes, _)| bytes)
                 .map_err(napi_error)
         })

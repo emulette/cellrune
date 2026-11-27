@@ -2,7 +2,8 @@
 
 use super::{CalculationCellId, CalculationCellResult, CalculationOptions, CancellationToken};
 use crate::{
-    CellRange, Provenance, ProviderIdentity, SheetId, WorkbookFingerprint, WorkbookSnapshot,
+    CellContent, CellRange, CellValue, FormulaMetadata, Provenance, ProviderIdentity, SavedResult,
+    SheetId, WorkbookDraft, WorkbookFingerprint, WorkbookSnapshot,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -35,6 +36,92 @@ impl CalculationTarget {
     /// Returns the requested range.
     pub const fn range(self) -> CellRange {
         self.range
+    }
+}
+
+/// What a targeted calculation does with a precedent formula of a requested cell that it cannot
+/// calculate, such as one calling a function CellRune does not support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum UncalculablePrecedents {
+    /// The requested cells reading it are unavailable too.
+    #[default]
+    Unavailable,
+    /// The precedent takes its saved result, the value the spreadsheet app that saved the file
+    /// calculated, when that result is still current: the file does not ask its host to
+    /// recalculate on open, and no edit of the session reaches the precedent. A precedent CellRune
+    /// calculates is calculated either way. A requested cell CellRune cannot calculate still
+    /// reports so, while the requested cells reading it take its saved result.
+    /// [`TargetCalculationResult::saved_precedents`] names the precedents a value went through.
+    SavedResult,
+}
+
+/// The saved results a targeted calculation may give the precedents it cannot calculate.
+#[derive(Debug, Clone)]
+pub(crate) struct SavedResultTrust {
+    /// The formulas the session's edits can have made out of date since the file was saved.
+    edited: BTreeSet<CalculationCellId>,
+    /// The sheets whose saved results come from the file: its own sheets and copies of them, not
+    /// sheets added or imported from another workbook.
+    sheets: BTreeSet<SheetId>,
+}
+
+impl SavedResultTrust {
+    /// Returns the trust in `draft`'s saved results: none for a workbook not read from a file, one
+    /// whose file asks its host to recalculate every formula on open, which writers set when they
+    /// save placeholder results, unless a minimal write that asked it left a mark the file still
+    /// matches, or one in manual calculation mode, whose results may predate its inputs.
+    pub(crate) fn of(draft: &WorkbookDraft) -> Option<Self> {
+        let document = draft.source_document()?;
+        let source = document.workbook();
+        if !crate::xlsx::saved_results_current(document)
+            || source.calculation_hints().mode() == Some(crate::CalculationMode::Manual)
+        {
+            return None;
+        }
+        let sheets = draft
+            .workbook()
+            .sheets()
+            .iter()
+            .map(|sheet| sheet.id())
+            .filter(|id| {
+                let origin = draft.copied_sheets().get(id).copied().unwrap_or(*id);
+                source.sheet_by_id(origin).is_some()
+            })
+            .collect();
+        Some(Self {
+            edited: crate::xlsx::formulas_edits_reach(draft, source),
+            sheets,
+        })
+    }
+
+    /// Returns the saved result of the formula at `cell` when it can stand for the formula's
+    /// value: a present result of a single-cell formula of a sheet from the file, which no edit
+    /// reached and which the file does not recalculate whenever it calculates.
+    pub(crate) fn value(
+        &self,
+        workbook: &WorkbookSnapshot,
+        cell: CalculationCellId,
+    ) -> Option<CellValue> {
+        if self.edited.contains(&cell) || !self.sheets.contains(&cell.sheet_id()) {
+            return None;
+        }
+        let source = workbook
+            .sheet_by_id(cell.sheet_id())?
+            .cell(cell.address())?;
+        let CellContent::Formula(formula) = source.content() else {
+            return None;
+        };
+        if formula.recalculate_always() {
+            return None;
+        }
+        match (formula.metadata(), formula.saved_result()) {
+            (
+                FormulaMetadata::Normal | FormulaMetadata::Shared { .. },
+                SavedResult::Present(value),
+            ) => Some(value.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -103,9 +190,18 @@ pub struct TargetCalculationResult {
     pub(super) evaluated_count: usize,
     pub(super) parsed_formula_count: usize,
     pub(super) reused_count: usize,
+    pub(super) saved_precedents: BTreeMap<CalculationCellId, Vec<CalculationCellId>>,
 }
 
 impl TargetCalculationResult {
+    /// Returns the precedent formulas `cell`'s formula reads, directly or through other formulas,
+    /// whose saved result stood for their value with [`UncalculablePrecedents::SavedResult`], so
+    /// that the value may carry the spreadsheet app's calculation of them; empty for a value
+    /// CellRune calculated throughout.
+    pub fn saved_precedents(&self, cell: CalculationCellId) -> &[CalculationCellId] {
+        self.saved_precedents.get(&cell).map_or(&[], Vec::as_slice)
+    }
+
     /// Returns one requested cell; unrequested cells are absent.
     pub fn cell(&self, cell: CalculationCellId) -> Option<&CalculationCellResult> {
         self.cells.get(&cell)
@@ -170,7 +266,7 @@ pub fn calculate_targets(
     cancellation: CancellationToken,
 ) -> Result<TargetCalculationResult, TargetCalculationError> {
     let cells = normalize_targets(workbook, targets, limits, &cancellation)?;
-    super::eval::Engine::calculate_targets(workbook, &cells, options, limits, &cancellation)
+    super::eval::Engine::calculate_targets(workbook, &cells, options, limits, None, &cancellation)
 }
 
 pub(super) fn normalize_targets(

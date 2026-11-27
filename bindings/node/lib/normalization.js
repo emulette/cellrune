@@ -602,7 +602,13 @@ function normalizeTargetCalculation(value) {
     calculationOptions: normalizeTransactionOptions(value.calculation_options),
     limits: { maxTargets: value.limits.max_targets, maxResultCells: value.limits.max_result_cells,
       maxEvaluatedCells: value.limits.max_evaluated_cells },
-    cells: value.cells.map(item => ({ cell: normalizeTransactionCellReference(item.cell), result: normalizeTransactionResult(item.result) })),
+    cells: value.cells.map(item => ({
+      cell: normalizeTransactionCellReference(item.cell),
+      result: normalizeTransactionResult(item.result),
+      ...(item.saved_precedents === undefined
+        ? {}
+        : { savedPrecedents: item.saved_precedents.map(normalizeTransactionCellReference) }),
+    })),
     evaluatedCount: value.evaluated_count,
     parsedFormulaCount: value.parsed_formula_count,
     reusedCount: value.reused_count,

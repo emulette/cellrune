@@ -1116,6 +1116,58 @@ pub fn generated_data_validation_edit_fixture() -> Vec<u8> {
     )
 }
 
+/// One sheet `Inputs` whose B1 calls WEBSERVICE, which CellRune does not calculate, on A1 with the
+/// saved result 42, as the spreadsheet app that saved the file calculated it. C1 = B1*2 reads it,
+/// D1 = A1+1 does not, and E1 = C1+B1 reads it twice. F1 = NOW() saved 45000.5, which CellRune
+/// does not calculate without a supplied time, and G1 = F1+1 reads it. H1 = A1+A1+A1 saved 15, and
+/// I1 = H1*2 reads it. `full_calculation_on_load` makes the file ask its host to recalculate on
+/// open, as writers saving placeholder results do.
+pub fn generated_saved_precedent_fixture(full_calculation_on_load: bool) -> Vec<u8> {
+    let workbook = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Inputs" sheetId="1" r:id="rId1"/><sheet name="Other" sheetId="2" r:id="rId2"/></sheets>
+  <calcPr calcId="191029"{}/>
+</workbook>"#,
+        if full_calculation_on_load {
+            r#" fullCalcOnLoad="1""#
+        } else {
+            ""
+        }
+    );
+    let inputs = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>5</v></c>
+      <c r="B1"><f>WEBSERVICE("https://example.com/"&amp;A1)</f><v>42</v></c>
+      <c r="C1"><f>B1*2</f><v>84</v></c>
+      <c r="D1"><f>A1+1</f><v>6</v></c>
+      <c r="E1"><f>C1+B1</f><v>126</v></c>
+      <c r="F1"><f>NOW()</f><v>45000.5</v></c>
+      <c r="G1"><f>F1+1</f><v>45001.5</v></c>
+      <c r="H1"><f>B1+C1+E1</f><v>252</v></c>
+      <c r="I1"><f>H1*2</f><v>504</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+    let other = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+    build_archive(
+        &[
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELATIONSHIPS),
+            ("xl/workbook.xml", workbook.as_str()),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELATIONSHIPS),
+            ("xl/styles.xml", STYLES),
+            ("xl/worksheets/sheet1.xml", inputs),
+            ("xl/worksheets/sheet2.xml", other),
+        ],
+        None,
+    )
+}
+
 /// One sheet `Rules` holding rules other tools write that CellRune would not accept as new ones:
 /// a whole-number rule between bounds that names only its first bound on B1, and a list rule on C1
 /// whose input title is 40 characters long.

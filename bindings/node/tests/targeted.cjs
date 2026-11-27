@@ -36,8 +36,31 @@ async function main() {
     [targets, {limits:{maxResultCells:1}}], [targets, {todaySerial:NaN}], [targets, {limits:{maxTargets:true}}]]) {
     await assert.rejects(workbook.calculateTargets(input, options), CellRuneError);
   }
+  // A created workbook holds no saved result, so asking for them changes nothing.
+  const saved = await workbook.calculateTargets(targets, { uncalculablePrecedents: "saved_result" });
+  assert.deepEqual(saved.cells, (await workbook.calculateTargets(targets)).cells);
+  assert.ok(saved.cells.every(item => !("savedPrecedents" in item)));
+  await assert.rejects(
+    workbook.calculateTargets(targets, { uncalculablePrecedents: "always" }),
+    error => error instanceof CellRuneError && error.code === "interop.calculation.target.invalid_payload",
+  );
   workbook.close();
   await assert.rejects(workbook.calculateTargets(targets), error => error.code === "interop.session.closed");
+
+  // A minimal save of a workbook read from bytes takes the saved-result mark option.
+  const source = Workbook.create();
+  source.setNumber("Sheet1", "A1", 2);
+  await source.recalculate();
+  const opened = await Workbook.fromBytes(await source.toBytes());
+  opened.setFormula("Sheet1", "B1", "=A1+1");
+  const marked = await opened.editsToBytes({ savedResultMark: true });
+  const unmarked = await opened.editsToBytes();
+  assert.ok(!marked.equals(unmarked), "the mark changes the workbook part");
+  assert.ok((await (await Workbook.fromBytes(marked)).summary()).sheets.length === 1);
+  await assert.rejects(opened.editsToBytes({ savedResultMark: 1 }), CellRuneError);
+  await assert.rejects(opened.editsToBytes({ mark: true }), CellRuneError);
+  opened.close();
+  source.close();
 }
 
 main().catch(error => { process.stderr.write(`${error.stack ?? error}\n`); process.exitCode = 1; });

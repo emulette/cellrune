@@ -134,7 +134,7 @@ pub use calculation::{
     CalculationTarget, CellDependents, CellPrecedents, CompletedTargetCalculation, Dependent,
     Precedent, PrecedentKind, PreparedTargetCalculation, TargetCalculationError,
     TargetCalculationErrorCode, TargetCalculationLimits, TargetCalculationResult,
-    calculate_targets,
+    UncalculablePrecedents, calculate_targets,
 };
 pub use cell::{
     Cell, CellContent, CellValue, ExcelError, FiniteNumber, NumberFormat, NumberFormatKind,

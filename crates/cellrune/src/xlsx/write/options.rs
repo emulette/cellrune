@@ -446,6 +446,7 @@ impl Default for WriteLimits {
 pub struct WriteOptions {
     limits: WriteLimits,
     replace_existing: bool,
+    saved_result_mark: bool,
 }
 
 impl WriteOptions {
@@ -454,7 +455,27 @@ impl WriteOptions {
         Self {
             limits,
             replace_existing: false,
+            saved_result_mark: false,
         }
+    }
+
+    /// Sets whether a minimal write of draft edits marks the file whose saved results are as
+    /// current as those of the file the draft was opened from, which is off by default.
+    ///
+    /// A minimal write removes the saved results its edits can make out of date and asks the
+    /// host to recalculate on open, as writers that save placeholder results also ask, so reading
+    /// the file again cannot tell its other saved results are current. The mark, an extension of
+    /// `workbook.xml` holding a SHA-256 of the package, lets
+    /// [`crate::UncalculablePrecedents::SavedResult`] take them while the package still matches it.
+    /// It is written only when the source's saved results were current, and other writes ignore it.
+    pub const fn with_saved_result_mark(mut self, saved_result_mark: bool) -> Self {
+        self.saved_result_mark = saved_result_mark;
+        self
+    }
+
+    /// Returns whether a minimal write marks the file's saved results as current.
+    pub const fn saved_result_mark(self) -> bool {
+        self.saved_result_mark
     }
 
     /// Explicitly enables or disables destination replacement.

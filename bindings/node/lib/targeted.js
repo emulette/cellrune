@@ -9,13 +9,14 @@ function targetRequest(targets, options) {
   if (!Array.isArray(targets)) throw inputError(INPUT_DETAIL.TARGETS_ARRAY);
   requireOptions(options);
   requireOptionKeys(options, ["todaySerial", "nowSerial", "randomSeed", "localeProfile", "arithmeticSemantics",
-    "financialSolverSemantics", "limits"]);
+    "financialSolverSemantics", "limits", "uncalculablePrecedents"]);
   requireOptionalFinite(options.todaySerial, "todaySerial");
   requireOptionalFinite(options.nowSerial, "nowSerial");
   requireOptionalU32(options.randomSeed, "randomSeed");
   requireOptionalLocaleProfile(options.localeProfile, "localeProfile");
   requireOptionalString(options.arithmeticSemantics, "arithmeticSemantics");
   requireOptionalString(options.financialSolverSemantics, "financialSolverSemantics");
+  requireOptionalString(options.uncalculablePrecedents, "uncalculablePrecedents");
   const limits = {};
   if (options.limits !== undefined) {
     requireOptions(options.limits);
@@ -40,6 +41,7 @@ function targetRequest(targets, options) {
       locale_profile: localeProfileWire(options.localeProfile),
       arithmetic_semantics: options.arithmeticSemantics, financial_solver_semantics: options.financialSolverSemantics },
     limits,
+    uncalculable_precedents: options.uncalculablePrecedents,
   });
 }
 

@@ -4,7 +4,7 @@ use crate::{
 };
 use cellrune::{
     CalculationTarget, CellAddress, CellRange, CompletedTargetCalculation,
-    PreparedTargetCalculation, TargetCalculationLimits,
+    PreparedTargetCalculation, TargetCalculationLimits, UncalculablePrecedents,
 };
 
 impl WorkbookSession {
@@ -52,10 +52,15 @@ impl WorkbookSession {
         let next = request_id
             .checked_add(1)
             .ok_or_else(InteropError::session_request_id_exhausted)?;
-        let prepared = self.engine.prepare_target_calculation(
+        let precedents = match request.uncalculable_precedents {
+            crate::UncalculablePrecedentsDto::Unavailable => UncalculablePrecedents::Unavailable,
+            crate::UncalculablePrecedentsDto::SavedResult => UncalculablePrecedents::SavedResult,
+        };
+        let prepared = self.engine.prepare_target_calculation_with(
             &targets,
             options,
             limits,
+            precedents,
             cancellation.clone(),
         )?;
         if let Some((_, active)) = &self.active_calculation {
@@ -145,9 +150,16 @@ impl PreparedTargetRequest {
             limits: self.limits,
             cells: result
                 .cells()
-                .map(|(id, result)| crate::TargetCalculationCellDto {
+                .map(|(id, cell_result)| crate::TargetCalculationCellDto {
                     cell: crate::convert::cell_reference(completed.workbook(), id),
-                    result: crate::convert::result_to_dto(result),
+                    result: crate::convert::result_to_dto(cell_result),
+                    saved_precedents: result
+                        .saved_precedents(id)
+                        .iter()
+                        .map(|precedent| {
+                            crate::convert::cell_reference(completed.workbook(), *precedent)
+                        })
+                        .collect(),
                 })
                 .collect(),
             evaluated_count: result.evaluated_count() as u64,

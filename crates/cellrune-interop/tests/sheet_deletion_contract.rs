@@ -196,6 +196,7 @@ fn targeted_calculation_and_previews_follow_a_deleted_sheet() {
         }],
         options: CalculationOptionsDto::default(),
         limits: Default::default(),
+        uncalculable_precedents: Default::default(),
     };
     let targeted = session
         .calculate_targets(&request("Sheet1"))

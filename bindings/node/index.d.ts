@@ -1160,8 +1160,17 @@ export interface SaveOptions extends WriteOptions {
   readonly replaceExisting?: boolean;
 }
 
-export interface EditSaveOptions {
+export interface EditSaveOptions extends EditBytesOptions {
   readonly replaceExisting?: boolean;
+}
+
+export interface EditBytesOptions {
+  /**
+   * Marks the file whose saved results are as current as those of the file the workbook was
+   * opened from, so that `uncalculablePrecedents: "saved_result"` takes them after the file is
+   * opened again, while it still matches the mark.
+   */
+  readonly savedResultMark?: boolean;
 }
 
 export interface EditWriteReport {
@@ -1361,6 +1370,12 @@ export interface TargetCalculationLimits {
 /** Targeted calculation keeps the default calculation limits. */
 export interface TargetCalculationOptions extends Omit<CalculationOptions, "calculationLimits"> {
   readonly limits?: Partial<TargetCalculationLimits>;
+  /**
+   * What a precedent formula CellRune cannot calculate gives the requested cells reading it:
+   * `unavailable` by default, or `saved_result` for the result saved in the file while it is
+   * current. A cell's `savedPrecedents` names the precedents its value went through.
+   */
+  readonly uncalculablePrecedents?: "unavailable" | "saved_result";
 }
 
 export interface TargetCalculationResult {
@@ -1372,7 +1387,12 @@ export interface TargetCalculationResult {
   readonly calculatorProvider: ProviderIdentity;
   readonly calculationOptions: TransactionCalculationOptions;
   readonly limits: TargetCalculationLimits;
-  readonly cells: readonly { readonly cell: CellReference; readonly result: CalculationResult }[];
+  readonly cells: readonly {
+    readonly cell: CellReference;
+    readonly result: CalculationResult;
+    /** Precedents whose saved result stood for their value; present only when there are some. */
+    readonly savedPrecedents?: readonly CellReference[];
+  }[];
   readonly evaluatedCount: number;
   readonly parsedFormulaCount: number;
   readonly reusedCount: number;
@@ -1503,7 +1523,7 @@ export class Workbook {
    * The source package with this session's edits written in, without calculating. Do not edit
    * the workbook until the Promise settles, as with {@link Workbook.toBytes}.
    */
-  editsToBytes(): Promise<Buffer>;
+  editsToBytes(options?: EditBytesOptions): Promise<Buffer>;
   /** Do not edit the workbook until the Promise settles, as with {@link Workbook.toBytes}. */
   saveEdits(path: string, options?: EditSaveOptions): Promise<EditWriteReport>;
 }

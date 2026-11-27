@@ -14,6 +14,7 @@ use super::package_metadata_patch::{
     remove_calculation_chain_relationship, remove_content_type_overrides, remove_relationships,
 };
 use super::phonetic_preservation::ensure_phonetic_edit_preservation;
+use super::saved_result_marker::marked;
 use super::serialization::validate_phonetic_limits;
 use super::sheet_copy_parts::{CopySource, duplicate_sheet_parts, highest_vml_block};
 use super::sheet_deletion::{plan_sheet_deletion, remove_pivot_cache_entries};
@@ -122,6 +123,7 @@ pub(crate) fn write_document_draft(
             materialization: &materialization,
             host_recalculation: Some(host_recalculation),
             keep_calculation_chain: false,
+            saved_result_mark: false,
         },
         limits,
     )?;
@@ -158,6 +160,9 @@ pub(super) struct DocumentResultPlan<'a> {
     pub(super) host_recalculation: Option<HostRecalculation>,
     /// Keeps `calcChain.xml`, valid only while every formula keeps its cell and array kind.
     pub(super) keep_calculation_chain: bool,
+    /// Marks the workbook part with a digest of the package, so that a read can tell its saved
+    /// results are current.
+    pub(super) saved_result_mark: bool,
 }
 
 /// A verified document draft package and the parts the write changed or removed.
@@ -1213,6 +1218,27 @@ pub(super) fn write_document_package(
     }
     let mut removals = chain_removals;
     removals.extend(optional_removals);
+    if plan.saved_result_mark {
+        let mut parts = additions.clone();
+        for part in source_reader.parts().cloned().collect::<Vec<_>>() {
+            if removals.contains(&part) || &part == workbook_part {
+                continue;
+            }
+            let bytes = match replacements.get(&part) {
+                Some(bytes) => bytes.clone(),
+                None => source_reader.read_part(&part)?,
+            };
+            parts.insert(part, bytes);
+        }
+        let workbook = match replacements.get(workbook_part) {
+            Some(bytes) => bytes.clone(),
+            None => source_reader.read_part(workbook_part)?,
+        };
+        replacements.insert(
+            workbook_part.clone(),
+            marked(&workbook, workbook_part, &parts, limits)?,
+        );
+    }
 
     drop(source_reader);
     let unchanged_sheets = unchanged_sheets(document, draft, materialization, &replacements);

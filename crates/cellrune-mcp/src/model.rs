@@ -283,6 +283,11 @@ pub(crate) struct CalculateTargetsArgs {
     /// Request limits, capped by the server at 1024 targets, 10000 results, and 100000 evaluator invocations.
     #[serde(default, deserialize_with = "cellrune_interop::deserialize_object")]
     pub(crate) limits: cellrune_interop::TargetCalculationLimitsDto,
+    /// What a precedent formula CellRune cannot calculate gives the requested cells reading it:
+    /// `unavailable` by default, or `saved_result` for the result saved in the file while it is
+    /// current.
+    #[serde(default)]
+    pub(crate) uncalculable_precedents: cellrune_interop::UncalculablePrecedentsDto,
 }
 
 /// Deterministic inputs for a target calculation. Calculation limits are absent because raising
@@ -401,6 +406,10 @@ pub(crate) struct SaveEditsArgs {
     /// Replace an existing file; also requires the server's `--allow-overwrite` opt-in.
     #[serde(default)]
     pub(crate) replace_existing: bool,
+    /// Mark the file whose saved results are as current as those of the opened file, so that
+    /// `uncalculable_precedents: saved_result` takes them after the file is opened again.
+    #[serde(default)]
+    pub(crate) saved_result_mark: bool,
 }
 
 /// Input for a verified, atomic workbook Save As operation.

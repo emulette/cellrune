@@ -59,8 +59,8 @@ export declare class NativeWorkbook {
   deleteSheet(name: string): void
   toBytes(invalidateUnavailable: boolean): Promise<Buffer>
   savePath(path: string, invalidateUnavailable: boolean, replaceExisting: boolean): Promise<NativeWriteReport>
-  editsToBytes(): Promise<Buffer>
-  saveEditsPath(path: string, replaceExisting: boolean): Promise<NativeEditWriteReport>
+  editsToBytes(savedResultMark: boolean): Promise<Buffer>
+  saveEditsPath(path: string, replaceExisting: boolean, savedResultMark: boolean): Promise<NativeEditWriteReport>
 }
 
 export declare function createWorkbook(): NativeWorkbook

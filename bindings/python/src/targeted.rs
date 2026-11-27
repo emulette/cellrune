@@ -2,7 +2,7 @@ use crate::error::into_py_error;
 use cellrune_interop::{
     ArithmeticSemanticsDto, CalculationLimitOptionsDto, CalculationOptionsDto,
     CalculationTargetDto, FinancialSolverSemanticsDto, InteropError, TargetCalculationLimitsDto,
-    TargetCalculationRequestDto,
+    TargetCalculationRequestDto, UncalculablePrecedentsDto,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
@@ -18,6 +18,8 @@ struct TargetRequestInput {
     options: TargetOptionsInput,
     #[serde(default)]
     limits: TargetCalculationLimitsDto,
+    #[serde(default)]
+    uncalculable_precedents: UncalculablePrecedentsDto,
 }
 
 /// Deterministic inputs for a target calculation. Targeted calculation keeps the default
@@ -60,6 +62,8 @@ pub(crate) fn request_from_python(
                     })?;
                     payload.set_item("limits", limits)?;
                 }
+            } else if key_text == "uncalculable_precedents" {
+                payload.set_item("uncalculable_precedents", value)?;
             } else {
                 calculation_options.set_item(key, value)?;
             }
@@ -88,5 +92,6 @@ pub(crate) fn request_from_python(
             calculation_limits: CalculationLimitOptionsDto::default(),
         },
         limits: request.limits,
+        uncalculable_precedents: request.uncalculable_precedents,
     })
 }

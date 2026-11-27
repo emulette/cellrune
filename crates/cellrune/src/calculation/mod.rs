@@ -95,7 +95,7 @@ pub use session::{
 };
 pub use targeted::{
     CalculationTarget, TargetCalculationError, TargetCalculationErrorCode, TargetCalculationLimits,
-    TargetCalculationResult, calculate_targets,
+    TargetCalculationResult, UncalculablePrecedents, calculate_targets,
 };
 
 /// Stable identity of a formula cell within one workbook snapshot.

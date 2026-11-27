@@ -857,22 +857,39 @@ impl Workbook {
         conversion::write_report(py, &report)
     }
 
-    pub fn edits_to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let result = py.detach(|| self.lock_interop_wait()?.save_edits_bytes());
+    #[pyo3(signature = (*, saved_result_mark=false))]
+    pub fn edits_to_bytes<'py>(
+        &self,
+        py: Python<'py>,
+        saved_result_mark: bool,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let result = py.detach(|| {
+            self.lock_interop_wait()?
+                .save_edits_bytes_with(EditWriteOptionsDto {
+                    replace_existing: false,
+                    saved_result_mark,
+                })
+        });
         let (bytes, _) = result.map_err(|error| into_py_error(py, error))?;
         Ok(PyBytes::new(py, &bytes))
     }
 
-    #[pyo3(signature = (path, *, replace_existing=false))]
+    #[pyo3(signature = (path, *, replace_existing=false, saved_result_mark=false))]
     pub fn save_edits<'py>(
         &self,
         py: Python<'py>,
         path: PathBuf,
         replace_existing: bool,
+        saved_result_mark: bool,
     ) -> PyResult<Bound<'py, PyDict>> {
         let result = py.detach(move || {
-            self.lock_interop_wait()?
-                .save_edits_path(path, EditWriteOptionsDto { replace_existing })
+            self.lock_interop_wait()?.save_edits_path(
+                path,
+                EditWriteOptionsDto {
+                    replace_existing,
+                    saved_result_mark,
+                },
+            )
         });
         let report = result.map_err(|error| into_py_error(py, error))?;
         conversion::edit_write_report(py, &report)

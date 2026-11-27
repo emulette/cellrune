@@ -1478,7 +1478,11 @@ class WorkbookTransactionReceipt(TypedDict):
     result_fingerprint: WorkbookFingerprint
 
 
-class TargetCalculationCell(TypedDict):
+class TargetCalculationCellProvenance(TypedDict, total=False):
+    saved_precedents: list[CellReference]
+
+
+class TargetCalculationCell(TargetCalculationCellProvenance):
     cell: CellReference
     result: CalculationResult
 

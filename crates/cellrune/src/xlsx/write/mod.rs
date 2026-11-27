@@ -20,6 +20,7 @@ mod path_output;
 mod phonetic_preservation;
 mod recalculation;
 mod report;
+mod saved_result_marker;
 mod serialization;
 mod sheet_content;
 mod sheet_copy_parts;
@@ -41,6 +42,7 @@ pub use authoring::{
     write_xlsx_draft, write_xlsx_draft_bytes, write_xlsx_draft_edits, write_xlsx_draft_edits_bytes,
     write_xlsx_draft_edits_path, write_xlsx_draft_path,
 };
+pub(crate) use document_edits::formulas_edits_reach;
 pub use edit_report::{EditWriteReport, EditedWorkbook};
 pub use error::{XlsxWriteError, XlsxWriteErrorCode};
 pub use options::{
@@ -53,3 +55,4 @@ pub use recalculation::{
     write_recalculated_xlsx, write_recalculated_xlsx_bytes, write_recalculated_xlsx_path,
 };
 pub use report::{RecalculatedWorkbook, WriteProvenance, WriteReport};
+pub(crate) use saved_result_marker::saved_results_current;

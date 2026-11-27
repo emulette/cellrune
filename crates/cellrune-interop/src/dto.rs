@@ -680,6 +680,11 @@ pub struct EditWriteOptionsDto {
     /// Whether a path save may replace an existing destination.
     #[serde(default)]
     pub replace_existing: bool,
+    /// Whether to mark the file whose saved results are as current as those of the file the
+    /// session was opened from, so that `uncalculable_precedents: saved_result` takes them after
+    /// the file is opened again, while it still matches the mark. Off by default.
+    #[serde(default)]
+    pub saved_result_mark: bool,
 }
 
 /// Save behavior exposed across language boundaries.

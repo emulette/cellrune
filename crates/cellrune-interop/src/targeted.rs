@@ -55,6 +55,25 @@ pub struct TargetCalculationRequestDto {
     /// Request-wide resource limits.
     #[serde(default, deserialize_with = "crate::deserialize_object")]
     pub limits: TargetCalculationLimitsDto,
+    /// What a precedent formula the request cannot calculate gives the requested cells reading
+    /// it; by default they are unavailable too.
+    #[serde(default)]
+    pub uncalculable_precedents: UncalculablePrecedentsDto,
+}
+
+/// What a precedent formula a partial calculation cannot calculate gives the requested cells
+/// reading it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UncalculablePrecedentsDto {
+    /// The requested cells reading it are unavailable too.
+    #[default]
+    Unavailable,
+    /// The precedent takes the saved result the spreadsheet app that saved the file calculated,
+    /// while that result is current: the file does not ask its host to recalculate on open, and
+    /// no edit of the session reaches the precedent. A requested cell's `saved_precedents` names
+    /// the precedents its value went through.
+    SavedResult,
 }
 
 /// Explicit marker that the result covers requested cells only.
@@ -73,6 +92,10 @@ pub struct TargetCalculationCellDto {
     pub cell: CellReferenceDto,
     /// Calculated value or stable unavailable issue.
     pub result: CalculationResultDto,
+    /// The precedent formulas whose saved result stood for their value in this cell's, with
+    /// `uncalculable_precedents: saved_result`; left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_precedents: Vec<CellReferenceDto>,
 }
 
 /// Complete bounded response to a partial calculation, never an installed workbook cache.

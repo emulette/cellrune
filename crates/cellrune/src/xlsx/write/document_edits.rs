@@ -8,6 +8,7 @@ use super::document_authoring::{
 };
 use super::edit_report::{EditWriteReport, EditedWorkbook};
 use super::materialization::MaterializationPlan;
+use super::saved_result_marker::saved_results_current;
 use super::workbook_patch::HostRecalculation;
 use super::{WriteOptions, XlsxWriteError, XlsxWriteErrorCode};
 use crate::calculation::{DraftEdits, affected_formulas};
@@ -35,23 +36,7 @@ pub(crate) fn write_document_edits(
     let limits = options.limits();
     validate_draft_edits(draft, limits)?;
     let source = document.workbook();
-    let grid_sheets = draft
-        .grid_histories()
-        .keys()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let changed_cells = calculation_changed_cells(draft, &grid_sheets);
-    let affected = affected_formulas(
-        &DraftEdits {
-            source,
-            draft: draft.workbook(),
-            changed_cells: &changed_cells,
-            changed_tables: draft.changed_table_ids(),
-            grid_sheets: &grid_sheets,
-        },
-        &|| false,
-    )
-    .expect("uncancellable impact analysis cannot be cancelled");
+    let affected = formulas_edits_reach(draft, source);
     let materialization = MaterializationPlan::invalidating(&affected, limits)?;
     let host_recalculation = if !affected.is_empty() {
         Some(HostRecalculation::OnLoad)
@@ -67,6 +52,7 @@ pub(crate) fn write_document_edits(
             materialization: &materialization,
             host_recalculation,
             keep_calculation_chain: formula_layout(source) == formula_layout(draft.workbook()),
+            saved_result_mark: options.saved_result_mark() && saved_results_current(document),
         },
         limits,
     )?;
@@ -81,6 +67,32 @@ pub(crate) fn write_document_edits(
         presentation_revision: draft.presentation_revision(),
     };
     Ok(EditedWorkbook::new(output.bytes, report, document.kind()))
+}
+
+/// Returns the formulas whose saved result the draft's edits can make out of date, compared with
+/// `source`, the workbook the draft was opened from: every formula on a sheet whose rows or
+/// columns moved, and every formula an edited cell, table, or name reaches.
+pub(crate) fn formulas_edits_reach(
+    draft: &WorkbookDraft,
+    source: &WorkbookSnapshot,
+) -> BTreeSet<CalculationCellId> {
+    let grid_sheets = draft
+        .grid_histories()
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let changed_cells = calculation_changed_cells(draft, &grid_sheets);
+    affected_formulas(
+        &DraftEdits {
+            source,
+            draft: draft.workbook(),
+            changed_cells: &changed_cells,
+            changed_tables: draft.changed_table_ids(),
+            grid_sheets: &grid_sheets,
+        },
+        &|| false,
+    )
+    .expect("uncancellable impact analysis cannot be cancelled")
 }
 
 /// Cells whose calculation input the draft changed. A shared-formula follower that only became an

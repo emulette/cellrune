@@ -753,6 +753,7 @@ fn edits_save_without_calculation_and_match_the_core_edit_writer() {
             &path,
             EditWriteOptionsDto {
                 replace_existing: true,
+                ..EditWriteOptionsDto::default()
             },
         )
         .expect("explicit replacement");

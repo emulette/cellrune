@@ -6,6 +6,7 @@ mod options;
 mod package;
 mod reader;
 mod write;
+pub(crate) use write::{formulas_edits_reach, saved_results_current};
 mod xml;
 mod xstring;
 

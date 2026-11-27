@@ -80,8 +80,20 @@ impl WorkbookSession {
     /// typed write error when an edit cannot be represented safely or the output fails
     /// verification.
     pub fn save_edits_bytes(&self) -> Result<(Vec<u8>, EditWriteReportDto), InteropError> {
-        let PreparedEditsSave { output, report, .. } =
-            self.prepare_edits_save(EditWriteOptionsDto::default())?;
+        self.save_edits_bytes_with(EditWriteOptionsDto::default())
+    }
+
+    /// Returns the edited package as [`Self::save_edits_bytes`] does, with `options`; a byte
+    /// output has no destination to replace.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::save_edits_bytes`].
+    pub fn save_edits_bytes_with(
+        &self,
+        options: EditWriteOptionsDto,
+    ) -> Result<(Vec<u8>, EditWriteReportDto), InteropError> {
+        let PreparedEditsSave { output, report, .. } = self.prepare_edits_save(options)?;
         Ok((output.into_bytes(), report))
     }
 
@@ -94,7 +106,9 @@ impl WorkbookSession {
         &self,
         options: EditWriteOptionsDto,
     ) -> Result<PreparedEditsSave, InteropError> {
-        let write_options = WriteOptions::default().with_replace_existing(options.replace_existing);
+        let write_options = WriteOptions::default()
+            .with_replace_existing(options.replace_existing)
+            .with_saved_result_mark(options.saved_result_mark);
         let output = write_xlsx_draft_edits_bytes(self.engine.draft(), write_options)?;
         let report = edit_write_report(self.engine.workbook(), output.report());
         Ok(PreparedEditsSave {

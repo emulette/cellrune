@@ -69,6 +69,7 @@ class Workbook:
         arithmetic_semantics: Literal["excel_near_zero", "ieee_754"] = "excel_near_zero",
         financial_solver_semantics: Literal["excel_iteration_budget", "extended_search"] = "excel_iteration_budget",
         limits: TargetCalculationLimitOptions | None = None,
+        uncalculable_precedents: Literal["unavailable", "saved_result"] = "unavailable",
     ) -> TargetCalculationResult: ...
     @staticmethod
     def create() -> Workbook: ...
@@ -289,10 +290,11 @@ class Workbook:
         invalidate_unavailable: bool = False,
         replace_existing: bool = False,
     ) -> WriteReport: ...
-    def edits_to_bytes(self) -> bytes: ...
+    def edits_to_bytes(self, *, saved_result_mark: bool = False) -> bytes: ...
     def save_edits(
         self,
         path: str | PathLike[str],
         *,
         replace_existing: bool = False,
+        saved_result_mark: bool = False,
     ) -> EditWriteReport: ...

@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::WorkbookCalculationSession;
-use crate::calculation::targeted::{normalize_targets, source_provenance};
+use crate::calculation::targeted::{SavedResultTrust, normalize_targets, source_provenance};
 use crate::{
     CalculationCellId, CalculationCellResult, CalculationOptions, CalculationSnapshot,
     CalculationTarget, CancellationToken, CellContent, CellValue, TargetCalculationError,
-    TargetCalculationErrorCode, TargetCalculationLimits, TargetCalculationResult, WorkbookSnapshot,
+    TargetCalculationErrorCode, TargetCalculationLimits, TargetCalculationResult,
+    UncalculablePrecedents, WorkbookSnapshot,
 };
 
 impl WorkbookCalculationSession {
@@ -21,12 +22,44 @@ impl WorkbookCalculationSession {
         limits: TargetCalculationLimits,
         cancellation: CancellationToken,
     ) -> Result<PreparedTargetCalculation, TargetCalculationError> {
+        self.prepare_target_calculation_with(
+            targets,
+            options,
+            limits,
+            UncalculablePrecedents::Unavailable,
+            cancellation,
+        )
+    }
+
+    /// Captures a bounded partial request, choosing with `precedents` what a precedent formula it
+    /// cannot calculate gives the requested cells, for execution without holding the session lock.
+    ///
+    /// With [`UncalculablePrecedents::SavedResult`], preparing analyzes the session's edits
+    /// against the file, and checks the mark of a file a marked minimal write saved, on every
+    /// request; when saved results can be taken, the request does not reuse a complete
+    /// calculation, whose values already carry the uncalculable precedents.
+    ///
+    /// # Errors
+    /// Rejects invalid targets, excessive result counts, or cancellation.
+    pub fn prepare_target_calculation_with(
+        &self,
+        targets: &[CalculationTarget],
+        options: CalculationOptions,
+        limits: TargetCalculationLimits,
+        precedents: UncalculablePrecedents,
+        cancellation: CancellationToken,
+    ) -> Result<PreparedTargetCalculation, TargetCalculationError> {
         let cells = normalize_targets(self.workbook(), targets, limits, &cancellation)?;
+        let saved = match precedents {
+            UncalculablePrecedents::Unavailable => None,
+            UncalculablePrecedents::SavedResult => SavedResultTrust::of(&self.draft),
+        };
         let previous = self
             .calculation
             .as_ref()
             .filter(|calculation| {
-                calculation.source_revision() == self.workbook().semantic_revision()
+                saved.is_none()
+                    && calculation.source_revision() == self.workbook().semantic_revision()
                     && self.calculation_options == Some(options)
             })
             .cloned();
@@ -35,6 +68,7 @@ impl WorkbookCalculationSession {
             cells,
             options,
             limits,
+            saved,
             cancellation,
             previous,
             base_cursor: self.next_cursor,
@@ -81,6 +115,31 @@ impl WorkbookCalculationSession {
                 .run()?,
         )
     }
+
+    /// Calculates requested cells, choosing with `precedents` what a precedent formula the
+    /// calculation cannot calculate gives them.
+    ///
+    /// # Errors
+    /// Returns a stable target, resource, cancellation, or stale-result error.
+    pub fn calculate_targets_with(
+        &self,
+        targets: &[CalculationTarget],
+        options: CalculationOptions,
+        limits: TargetCalculationLimits,
+        precedents: UncalculablePrecedents,
+        cancellation: CancellationToken,
+    ) -> Result<TargetCalculationResult, TargetCalculationError> {
+        self.finish_target_calculation(
+            self.prepare_target_calculation_with(
+                targets,
+                options,
+                limits,
+                precedents,
+                cancellation,
+            )?
+            .run()?,
+        )
+    }
 }
 
 /// An immutable partial calculation job that owns its source snapshot.
@@ -90,6 +149,7 @@ pub struct PreparedTargetCalculation {
     cells: BTreeSet<CalculationCellId>,
     options: CalculationOptions,
     limits: TargetCalculationLimits,
+    saved: Option<SavedResultTrust>,
     cancellation: CancellationToken,
     previous: Option<Arc<CalculationSnapshot>>,
     base_cursor: u64,
@@ -111,6 +171,7 @@ impl PreparedTargetCalculation {
                 &self.cells,
                 self.options,
                 self.limits,
+                self.saved.as_ref(),
                 &self.cancellation,
             )?
         };
@@ -161,6 +222,7 @@ impl PreparedTargetCalculation {
             evaluated_count: 0,
             parsed_formula_count: 0,
             reused_count,
+            saved_precedents: BTreeMap::new(),
         })
     }
 }

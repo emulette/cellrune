@@ -6,7 +6,7 @@ use super::{DependencyTarget, Engine, public_to_internal};
 use crate::calculation::graph::{DependencyGraph, DependencyNode};
 use crate::calculation::parser::parse_formula_with_limits;
 use crate::calculation::runtime::CellId;
-use crate::calculation::targeted::source_provenance;
+use crate::calculation::targeted::{SavedResultTrust, source_provenance};
 use crate::calculation::value::{ErrorKind, Value};
 use crate::{
     CalculationCellId, CalculationCellResult, CalculationIssue, CalculationOptions,
@@ -21,13 +21,18 @@ struct Frame {
     next: usize,
 }
 
-struct Planner {
+struct Planner<'trust> {
     loaded: BTreeSet<CellId>,
     names: BTreeSet<usize>,
     done: BTreeSet<CellId>,
     edges: usize,
     attempts: usize,
     limits: TargetCalculationLimits,
+    /// The saved results precedents may take.
+    saved: Option<&'trust SavedResultTrust>,
+    /// The precedents whose saved result stands for their value, with the result the calculation
+    /// gave them, which a requested cell among them still reports.
+    substituted: BTreeMap<CellId, CalculationCellResult>,
 }
 
 fn cancelled_error() -> TargetCalculationError {
@@ -40,6 +45,7 @@ impl<'workbook> Engine<'workbook> {
         targets: &BTreeSet<CalculationCellId>,
         options: CalculationOptions,
         limits: TargetCalculationLimits,
+        saved: Option<&SavedResultTrust>,
         cancellation: &CancellationToken,
     ) -> Result<TargetCalculationResult, TargetCalculationError> {
         let cancelled = || cancellation.is_cancelled();
@@ -55,6 +61,8 @@ impl<'workbook> Engine<'workbook> {
             edges: 0,
             attempts: 0,
             limits,
+            saved,
+            substituted: BTreeMap::new(),
         };
         for pass in 0..2 {
             for target in targets {
@@ -74,6 +82,7 @@ impl<'workbook> Engine<'workbook> {
             // matching the full evaluator's second scheduling pass without parsing unrelated formulas.
             planner.done.clear();
             planner.edges = 0;
+            planner.substituted.clear();
             engine.dependencies = Arc::new(DependencyGraph::default());
             engine.results.clear();
             engine.retained_results.clear();
@@ -88,6 +97,7 @@ impl<'workbook> Engine<'workbook> {
         engine.cycle_cells = Arc::new(schedule.cycle_cells);
         engine.blocked_cells = Arc::new(schedule.blocked_cells);
         let mut cells = BTreeMap::new();
+        let mut saved_precedents = BTreeMap::new();
         for target in targets {
             if cancelled() {
                 return Err(cancelled_error());
@@ -96,7 +106,9 @@ impl<'workbook> Engine<'workbook> {
                 let owner = planner.owner(&engine, cell);
                 let result = if let Some(owner) = owner {
                     let owner_result =
-                        crate::calculation::pipeline::target_result(workbook, &engine, owner);
+                        planner.substituted.get(&owner).cloned().unwrap_or_else(|| {
+                            crate::calculation::pipeline::target_result(workbook, &engine, owner)
+                        });
                     match owner_result {
                         CalculationCellResult::Unavailable(_) => owner_result,
                         _ if owner == cell => owner_result,
@@ -109,6 +121,14 @@ impl<'workbook> Engine<'workbook> {
                         engine.cell_value(cell),
                     ))
                 };
+                if matches!(result, CalculationCellResult::Value(_))
+                    && let Some(owner) = owner
+                {
+                    let reached = planner.substituted_precedents(&engine, owner);
+                    if !reached.is_empty() {
+                        saved_precedents.insert(*target, reached);
+                    }
+                }
                 cells.insert(*target, result);
             }
         }
@@ -125,11 +145,66 @@ impl<'workbook> Engine<'workbook> {
             evaluated_count: planner.attempts,
             parsed_formula_count: planner.loaded.len(),
             reused_count: 0,
+            saved_precedents,
         })
     }
 }
 
-impl Planner {
+impl Planner<'_> {
+    /// Gives an evaluated formula that the calculation cannot calculate its saved result, for the
+    /// formulas reading it, when the request takes saved results and trusts this one.
+    fn substitute_saved_result(&mut self, engine: &mut Engine<'_>, cell: CellId) {
+        let Some(trust) = self.saved else {
+            return;
+        };
+        let result = crate::calculation::pipeline::target_result(engine.workbook, engine, cell);
+        // A volatile formula missing its input has no saved result current at another time.
+        let CalculationCellResult::Unavailable(issue) = &result else {
+            return;
+        };
+        if issue.code() == crate::CalculationIssueCode::VolatileInputMissing {
+            return;
+        }
+        let Some(public) = crate::calculation::eval::internal_to_public(engine.workbook, cell)
+        else {
+            return;
+        };
+        if let Some(value) = trust.value(engine.workbook, public) {
+            engine.retained_results.remove(&cell);
+            engine
+                .results
+                .insert(cell, crate::calculation::convert::value_from_cell(&value));
+            self.substituted.insert(cell, result);
+        }
+    }
+
+    /// Returns the substituted precedents `owner`'s value reads, directly or through other
+    /// formulas, without looking past a substituted one.
+    fn substituted_precedents(&self, engine: &Engine<'_>, owner: CellId) -> Vec<CalculationCellId> {
+        let mut reached = BTreeSet::new();
+        let mut visited = BTreeSet::from([owner]);
+        let mut pending = vec![owner];
+        while let Some(cell) = pending.pop() {
+            for node in engine.dependencies.dependencies(cell).into_iter().flatten() {
+                let DependencyNode::Cell(dependency) = node else {
+                    continue;
+                };
+                if !visited.insert(*dependency) {
+                    continue;
+                }
+                if self.substituted.contains_key(dependency) {
+                    reached.insert(*dependency);
+                } else {
+                    pending.push(*dependency);
+                }
+            }
+        }
+        reached
+            .into_iter()
+            .filter_map(|cell| crate::calculation::eval::internal_to_public(engine.workbook, cell))
+            .collect()
+    }
+
     fn owner(&self, engine: &Engine<'_>, cell: CellId) -> Option<CellId> {
         engine.array_owner(cell).or_else(|| {
             let sheet = engine.workbook.sheets().get(cell.0)?;
@@ -360,7 +435,13 @@ impl Planner {
                         }
                     }
                     engine.evaluated_cells.insert(cell);
+                    self.substitute_saved_result(engine, cell);
                 }
+            }
+            // A formula left with a dependency-budget result before evaluating takes its saved
+            // result as one that evaluated to an issue does.
+            if engine.retained_results.contains_key(&cell) {
+                self.substitute_saved_result(engine, cell);
             }
             self.done.insert(cell);
             active.remove(&cell);
